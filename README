@@ -1,0 +1,6 @@
+Widefield Python Toolbox
+
+A scientific computing toolbox for analysis of widefield microscopy functional data.
+
+Current supported experimental designs:
+   -Blocked design
