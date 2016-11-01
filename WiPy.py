@@ -488,7 +488,7 @@ def make_movie_from_stack(frameStack,frameRate=24,movFile='test.mp4'):
         misc.imsave(outFile,frame)
 
     #WRITE VIDEO
-    cmd='ffmpeg -y -r '+'%.3f'%frameRate+' -i '+tmpDir+'%d.png -vcodec libx264 -f avi '+movFile
+    cmd='ffmpeg -y -r '+'%.3f'%frameRate+' -i '+tmpDir+'%d.png -vcodec mjpeg -f avi '+movFile
     os.system(cmd)
 
 
