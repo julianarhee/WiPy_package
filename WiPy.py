@@ -659,15 +659,13 @@ def average_trials_tWindow(sourceRoot, targetRoot, sessID, nCond, runList, avgFo
     im0=misc.imread(imFile)
     sz=im0.shape
 
-
     for cond in range(nCond):
-        print(cond)
+        print('cond = '+str(cond))
         # RETRIEVE DATA
-        runCount=-1
-        for run in runList:
-            print(run)
 
-            runCount+=1
+        for (runCount,run) in enumerate(runList):
+            print('run = '+str(run))
+            
             inFile=inDir+sessID+'_run'+str(run)+'.npz'
             f=np.load(inFile)
             stimBlockCond=f['stimBlockCond']
@@ -681,9 +679,10 @@ def average_trials_tWindow(sourceRoot, targetRoot, sessID, nCond, runList, avgFo
             condInd=np.where(stimBlockCond==cond+1)[0]
 
             if runCount==0:
-
-                stimRespAll=np.zeros((nPix,len(condInd)*len(runList),stimPts))
-                baseRespAll=np.zeros((nPix,len(condInd)*len(runList),basePts))
+                trialsPerCond=(len(runList)*nTrials)/nCond#assume all runs have same number of trials per condition
+                
+                stimRespAll=np.zeros((nPix,trialsPerCond,stimPts))
+                baseRespAll=np.zeros((nPix,trialsPerCond,basePts))
 
             startInd=(runCount)*len(condInd)
             endInd=startInd+len(condInd)
