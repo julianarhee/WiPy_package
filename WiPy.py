@@ -462,7 +462,7 @@ def make_pixel_plots(sourceRoot, targetRoot, sessID, frameRate, avgFolder,\
         plt.savefig(figOutDir+'pixel_'+str(pix)+'_timecourse_trialAvg.png')
         
         
-def make_movie_from_stack(frameStack,frameRate=24,movFile='test.mp4'):
+def make_movie_from_stack(frameStack,frameRate=24,movFile='test.avi'):
     #Cesar Echavarria 10/2016
     
     #CHECK INPUTS
@@ -496,7 +496,7 @@ def make_movie_from_stack(frameStack,frameRate=24,movFile='test.mp4'):
     shutil.rmtree(tmpDir)
     
                                     
-def make_movie_from_stack_mark_stim(frameStack,frameRate=24,onFrame=0,offFrame=None,movFile='test.mp4'):
+def make_movie_from_stack_mark_stim(frameStack,frameRate=24,onFrame=0,offFrame=None,movFile='test.avi'):
     #Cesar Echavarria 10/2016
     
     #CHECK INPUTS
@@ -533,7 +533,7 @@ def make_movie_from_stack_mark_stim(frameStack,frameRate=24,onFrame=0,offFrame=N
         misc.imsave(outFile,frame)
 
     #WRITE VIDEO
-    cmd='ffmpeg -y -r '+'%.3f'%frameRate+' -i '+tmpDir+'%d.png -vcodec mpeg4 '+movFile
+    cmd='ffmpeg -y -r '+'%.3f'%frameRate+' -i '+tmpDir+'%d.png -vcodec mjpeg '+movFile
     os.system(cmd)
 
 
