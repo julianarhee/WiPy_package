@@ -686,17 +686,15 @@ def average_trials_tWindow(sourceRoot, targetRoot, sessID, nCond, runList, avgFo
                 startInd=0
 
             endInd=startInd+len(condInd)
-            print(len(condInd))
-            print(startInd)
-            print(endInd)
 
             stimRespAll[:,startInd:endInd,:]=stimResp[:,condInd,:]
             baseRespAll[:,startInd:endInd,:]=baseResp[:,condInd,:]
             startInd=endInd
         # AVERAGE OVER TIME
         if cond==0:
-            baseRespTimeMean=np.zeros((nPix,len(condInd)*len(runList),nCond))
-            stimRespTimeMean=np.zeros((nPix,len(condInd)*len(runList),nCond))
+            trialsPerCond=(len(runList)*nTrials)/nCond#assume all runs have same number of trials per condition
+            baseRespTimeMean=np.zeros((nPix,trialsPerCond,nCond))
+            stimRespTimeMean=np.zeros((nPix,trialsPerCond,nCond))
         baseRespTimeMean[:,:,cond]=np.mean(baseRespAll,2)#avg over time
         stimRespTimeMean[:,:,cond]=np.mean(stimRespAll,2)#avg over time
         
