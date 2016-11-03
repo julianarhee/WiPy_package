@@ -660,7 +660,7 @@ def average_trials_tWindow(sourceRoot, targetRoot, sessID, nCond, runList, avgFo
     sz=im0.shape
 
     for cond in range(nCond):
-        print('cond = '+str(cond))
+        print('cond = '+str(cond+1))
         # RETRIEVE DATA
 
         for (runCount,run) in enumerate(runList):
@@ -683,12 +683,16 @@ def average_trials_tWindow(sourceRoot, targetRoot, sessID, nCond, runList, avgFo
                 
                 stimRespAll=np.zeros((nPix,trialsPerCond,stimPts))
                 baseRespAll=np.zeros((nPix,trialsPerCond,basePts))
+                startInd=0
 
-            startInd=(runCount)*len(condInd)
             endInd=startInd+len(condInd)
+            print(len(condInd))
+            print(startInd)
+            print(endInd)
 
             stimRespAll[:,startInd:endInd,:]=stimResp[:,condInd,:]
             baseRespAll[:,startInd:endInd,:]=baseResp[:,condInd,:]
+            startInd=endInd
         # AVERAGE OVER TIME
         if cond==0:
             baseRespTimeMean=np.zeros((nPix,len(condInd)*len(runList),nCond))
