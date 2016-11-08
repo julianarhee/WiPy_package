@@ -12,6 +12,71 @@ from matplotlib import colors
 import time
 import shutil
 
+__version__ = '0.1.0'
+
+# # # # # # # # # # # # # # # # # # # # # # # # # # # #
+
+# MISCELANOUS
+
+# # # # # # # # # # # # # # # # # # # # # # # # # # # #
+
+def cart2pol(x, y):
+    rho = np.sqrt(x**2 + y**2)
+    phi = np.arctan2(y, x)
+    return(rho, phi)
+
+def pol2cart(rho, phi):
+    x = rho * np.cos(phi)
+    y = rho * np.sin(phi)
+    return(x, y)
+
+def get_theta_array(szY,szX):
+    #Cesar Echavarria 11/2016
+
+
+    x = np.linspace(-1, 1, szX)
+    y = np.linspace(-1, 1, szY)
+    xv, yv = np.meshgrid(x, y)
+
+    [radius,theta]=cart2pol(xv,yv)
+    theta = np.rad2deg(theta)
+    
+    return theta
+
+def array2cmap(X):
+    N = X.shape[0]
+
+    r = np.linspace(0., 1., N+1)
+    r = np.sort(np.concatenate((r, r)))[1:-1]
+
+    rd = np.concatenate([[X[i, 0], X[i, 0]] for i in xrange(N)])
+    gr = np.concatenate([[X[i, 1], X[i, 1]] for i in xrange(N)])
+    bl = np.concatenate([[X[i, 2], X[i, 2]] for i in xrange(N)])
+
+    rd = tuple([(r[i], rd[i], rd[i]) for i in xrange(2 * N)])
+    gr = tuple([(r[i], gr[i], gr[i]) for i in xrange(2 * N)])
+    bl = tuple([(r[i], bl[i], bl[i]) for i in xrange(2 * N)])
+
+
+    cdict = {'red': rd, 'green': gr, 'blue': bl}
+    return colors.LinearSegmentedColormap('my_colormap', cdict, N)
+# # # # # # # # # # # # # # # # # # # # # # # # # # # #
+
+# GENERAL PURPOSE WiPy FUNCTIONS
+
+# # # # # # # # # # # # # # # # # # # # # # # # # # # #
+
+
+def normalize_stack(frameStack):
+    #Cesar Echavarria 11/2016
+    
+    #MAKE SURE YOU GET SOME ARGUMENTS
+    if frameStack is None:
+        raise TypeError("No Arguments Passed!")
+
+    frameStack=np.true_divide((frameStack-np.min(frameStack)),(np.max(frameStack)-np.min(frameStack)))
+    return frameStack
+
 
 def get_frame_times(planFolder):
     #Cesar Echavarria 10/2016
@@ -52,6 +117,11 @@ def get_block_paradigm(planFolder):
     nBlocks=len(blockCond)
     return blockCond,blockStartT,nBlocks
 
+# # # # # # # # # # # # # # # # # # # # # # # # # # # #
+
+# STRUCTURAL INFO FUNCTIONS
+
+# # # # # # # # # # # # # # # # # # # # # # # # # # # #
 
 def get_surface(sourceRoot,targetRoot,sessID):
     #Cesar Echavarria - 10/2016
@@ -97,9 +167,413 @@ def get_surface(sourceRoot,targetRoot,sessID):
     imAvg=np.true_divide(imAvg,2**12)*(2**16)
     cv2.imwrite(outFile,np.uint16(imAvg))#THIS FILE MUST BE OPENED WITH CV2 MODULE
 
+
+
+def get_reference_frame(sourceRoot,sessID,runList):
+    #Cesar Echavarria 11/2016
     
-def analyze_blocked_data(sourceRoot, targetRoot, sessID, runList, frameRate, timecourseAnalysis=False,baseline_startT=-2, baseline_endT=0, timecourse_startT=0, timecourse_endT=8, timeWindowAnalysis=False, tWindow1_startT=-2, tWindow1_endT=0, tWindow2_startT=0, tWindow2_endT=5,qualityControl=True ,motionCorrection=False, dsFactor=1, fwhm=0):
-    #Cesar Echavarria 10/2016
+    #MAKE SURE YOU GET SOME ARGUMENTS
+    if sourceRoot is None:
+        raise TypeError("sourceRoot is not defined!")
+    if sessID is None:
+        raise TypeError("sessID is not defined!")
+    if runList is None:
+        raise TypeError("runList is not defined!")
+        
+    runFolder=glob.glob(sourceRoot+sessID+'/'+sessID+'_run'+str(runList[0])+'_*')
+    frameFolder=runFolder[0]+"/frames/"
+        
+    imFile=frameFolder+'frame0.tiff'
+    imRef=misc.imread(imFile)
+    return imRef
+
+ # # # # # # # # # # # # # # # # # # # # # # # # # # # #
+
+# QUALITY CONTROL FUNCTIONS
+
+# # # # # # # # # # # # # # # # # # # # # # # # # # # #
+
+def get_first_frame_correlation(sourceRoot,sessID,runList):
+    if sourceRoot is None:
+        raise TypeError("sourceRoot (directory) not specified!")
+    if sessID is None:
+        raise TypeError("sessID not specified!")
+    if runList is None:
+        raise TypeError("runList not specified!")
+
+    for (runCount,run) in enumerate(runList):
+
+        runFolder=glob.glob(sourceRoot+sessID+'_run'+str(run)+'_*')
+        frameFolder=runFolder[0]+"/frames/"
+
+        # READ IN FRAMES
+        imFile=frameFolder+'frame0.tiff'
+        im0=misc.imread(imFile)
+        sz=im0.shape
+
+        #STORE PIXEL VALUES OF FIRST FRAME
+        if runCount==0:
+            frame1PixMat=np.zeros((sz[0]*sz[1],len(runList)))
+        frame1PixMat[:,runCount]=np.reshape(im0,sz[0]*sz[1])
+    R=np.corrcoef(np.transpose(frame1PixMat))   
+    
+    return R
+
+# # # # # # # # # # # # # # # # # # # # # # # # # # # #
+
+# MOTION CORRECTION FUNCTIONS
+
+# # # # # # # # # # # # # # # # # # # # # # # # # # # #
+
+def motion_registration(imRef,frameStack):
+    #Cesar Echavarria 11/2016
+    
+    #MAKE SURE YOU GET SOME ARGUMENTS
+    if imRef is None:
+        raise TypeError("imRef (reference image) is not defined!")
+    if frameStack is None:
+        raise TypeError("no frame stack defined!")
+
+    imRef_forReg=np.uint8(np.true_divide(imRef,np.max(imRef))*255)
+    frameCount=np.shape(frameStack)[2]
+
+    
+    # Define the motion model
+    warp_mode = cv2.MOTION_EUCLIDEAN
+
+    # Specify the number of iterations.
+    number_of_iterations = 10;
+
+    # Specify the threshold of the increment
+    # in the correlation coefficient between two iterations
+    termination_eps = 1e-10;
+
+    # Define termination criteria
+    criteria = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, number_of_iterations,  termination_eps)
+
+    warpMatrices=np.zeros((2,3,frameCount))
+    motionMag=np.zeros((frameCount))
+    
+    for f in range (0,frameCount):
+        if f%100==0:
+            print('Motion Registration at frame ' +str(f)+' of '+str(frameCount))
+        im0=np.copy(frameStack[:,:,f])
+        im0_forReg=np.uint8(np.true_divide(im0,np.max(im0))*255)
+
+        # Define 2x3 or 3x3 matrices and initialize the matrix to identity
+        warp_matrix = np.eye(2, 3, dtype=np.float32)
+
+
+        # Run the ECC algorithm. The results are stored in warp_matrix.
+        (cc, warp_matrix) = cv2.findTransformECC (imRef_forReg,im0_forReg,warp_matrix, warp_mode, criteria)
+        warpMatrices[:,:,f]=warp_matrix
+        motionMag[f]=np.sum(np.square(np.eye(2, 3, dtype=np.float32)-warp_matrix))
+    
+    return warpMatrices,motionMag
+
+def apply_motion_correction(frameStack=None,warpMatrices=None):
+    #Cesar Echavarria 11/2016
+    
+    #MAKE SURE YOU GET SOME ARGUMENTS
+    if frameStack is None:
+        raise TypeError("no frame stack defined!")
+    if frameStack is None:
+        raise TypeError("no warp matrices provided!")
+        
+  
+        
+    #APPLY TRANSFORMATION AND TRIM
+    szY,szX,frameCount=np.shape(frameStack)
+    newFrameStack=np.zeros((szY,szX,frameCount))
+    
+    for f in range (0,frameCount):
+        if f%100==0:
+            print('Motion Correction at frame ' +str(f)+' of '+str(frameCount))
+        im0=np.copy(frameStack[:,:,f])
+        warpMatrix=warpMatrices[:,:,f]
+        im1 = cv2.warpAffine(im0, warpMatrix, (szX,szY), flags=cv2.INTER_LINEAR + cv2.WARP_INVERSE_MAP);
+        newFrameStack[:,:,f]=im1
+    return newFrameStack
+
+
+
+def get_boundaries(img=None):
+    #Cesar Echavarria 11/2016
+    
+    #MAKE SURE YOU GET SOME ARGUMENTS
+    if img is None:
+        raise TypeError("no image array given!")
+    
+    szY,szX = np.shape(img)
+    theta = get_theta_array(szY,szX)
+    
+    
+    halfAngle=42.5
+    physicalUp=np.logical_and(theta>-90-halfAngle, theta <-90+halfAngle)
+    physicalRight=np.logical_and(theta>-halfAngle, theta <halfAngle)
+    physicalDown=np.logical_and(theta>90-halfAngle, theta <90+halfAngle)
+    physicalLeft=np.abs(theta)>180-halfAngle
+    
+
+    zeroUp=np.where(np.logical_and(img<10,physicalUp))[0]
+    zeroDown=np.where(np.logical_and(img<10,physicalDown))[0]
+    zeroLeft=np.where(np.logical_and(img<10,physicalLeft))[1]
+    zeroRight=np.where(np.logical_and(img<10,physicalRight))[1]
+
+    if np.size(zeroUp)==0:
+        edgeUp=1
+    else:
+        edgeUp=np.max(zeroUp)+3
+
+    if np.size(zeroDown)==0:
+        edgeDown=szY
+    else:
+        edgeDown=np.min(zeroDown)-3
+
+    if np.size(zeroLeft)==0:
+        edgeLeft=1
+    else:
+        edgeLeft=np.max(zeroLeft)+3
+
+    if np.size(zeroRight)==0:
+        edgeRight=szX
+    else:
+        edgeRight=np.min(zeroRight)-3
+        
+    return edgeUp,edgeDown,edgeLeft,edgeRight
+
+def get_motion_corrected_boundaries(frameStack=None,warpMatrices=None):
+    #Cesar Echavarria 11/2016
+    
+    #MAKE SURE YOU GET SOME ARGUMENTS
+    if frameStack is None:
+        raise TypeError("no frame stack given!")
+    if warpMatrices is None:
+        raise TypeError("no warp matrix stack given!")
+
+    print('Getting motion corrected image boundaries...')
+    szY,szX,frameCount=np.shape(frameStack) 
+    
+    edgeUpList=np.zeros((frameCount))
+    edgeDownList=np.zeros((frameCount))
+    edgeLeftList=np.zeros((frameCount))
+    edgeRightList=np.zeros((frameCount))
+    for f in range (0,frameCount):
+        im0=np.copy(frameStack[:,:,f])
+        
+        edgeUp,edgeDown,edgeLeft,edgeRight = get_boundaries(im0)
+
+        edgeUpList[f]=edgeUp
+        edgeDownList[f]=edgeDown
+        edgeLeftList[f]=edgeLeft
+        edgeRightList[f]=edgeRight
+    
+    return edgeUpList,edgeDownList,edgeLeftList,edgeRightList
+    
+
+def apply_motion_correction_boundaries(frameStack=None,boundaries=None):
+    #Cesar Echavarria 11/2016
+    
+    #MAKE SURE YOU GET SOME ARGUMENTS
+    if frameStack is None:
+        raise TypeError("no frame stack given!")
+    if boundaries is None:
+        raise TypeError("no boundaries given!")
+    
+    print('Applying motion corrected image boundaries...')
+    frameCount=np.shape(frameStack)[2]
+    
+    edgeUp=boundaries[0]
+    edgeDown=boundaries[1]
+    edgeLeft=boundaries[2]
+    edgeRight=boundaries[3]
+    
+    newSzY=edgeDown-edgeUp
+    newSzX=edgeRight-edgeLeft
+    
+    newFrameStack=np.zeros((newSzY,newSzX,frameCount))
+    for f in range (0,frameCount):
+        if f%100==0:
+            print('frame ' +str(f)+' of '+str(frameCount))
+        im0=np.copy(frameStack[:,:,f])
+        newFrameStack[:,:,f]=im0[edgeUp:edgeDown,edgeLeft:edgeRight]
+        
+    return newFrameStack
+
+def perform_motion_registration(sourceRoot,targetRoot,sessID,runList,makeMovies=False):
+    #Cesar Echavarria 11/2016
+    
+     #MAKE SURE YOU GET SOME ARGUMENTS
+    if sourceRoot is None:
+        raise TypeError("sourceRoot (directory) not specified!")
+    if targetRoot is None:
+        raise TypeError("targetRoot (directory) not specified!")
+    if runList is None:
+        raise TypeError("runList not specified!")
+    if sessID is None:
+        raise TypeError("sessID not specified!")
+        
+    #DEFINE AND MAKE DIRECTORIES
+    motionDir=targetRoot+'/Sessions/'+sessID+'/Motion/';
+    if not os.path.exists(motionDir):
+                os.makedirs(motionDir)
+
+    motionFileDir=motionDir+'Registration/'
+    if not os.path.exists(motionFileDir):
+                os.makedirs(motionFileDir)
+
+    motionFigDir=motionDir+'Figures/'
+    if not os.path.exists(motionFigDir):
+                os.makedirs(motionFigDir)
+            
+    motionMovieDir=motionDir+'Movies/'
+    if makeMovies:
+        if not os.path.exists(motionMovieDir):
+            os.makedirs(motionMovieDir)
+
+    #OUTPUT TEXT FILE WITH PACKAGE VERSION
+	outFile=motionFileDir+'analysis_version_info.txt'
+	f = open(outFile, 'w+')
+	f.write(__version__+'\n')
+	f.close()
+
+    #GET REFFERNCE FRAME
+    imRef=get_reference_frame(sourceRoot,sessID,runList)
+    szY,szX=imRef.shape
+
+
+    #PERFORM REGISTRATION FOR ALL RUNS
+    for (runCount,run) in enumerate(runList):
+        print('Performing image registration for run '+str(run))
+
+        runFolder=glob.glob(sourceRoot+sessID+'/'+sessID+'_run'+str(run)+'_*')
+        frameFolder=runFolder[0]+"/frames/"
+        planFolder=runFolder[0]+"/plan/"
+
+        frameTimes,frameCond,frameCount=wp.get_frame_times(planFolder)
+
+        #READ IN FRAMES
+        frameArray=np.zeros((szY,szX,frameCount))
+        print('Loading frames....')
+        for f in range (0,frameCount):
+            imFile=frameFolder+'frame'+str(f)+'.tiff'
+            im0=misc.imread(imFile)
+            frameArray[:,:,f]=im0[:,:]
+            
+        if makeMovies:
+            #GENRATE RAW DATA MOVIE
+            frameArrayNorm=normalize_stack(frameArray)
+            outFile=motionMovieDir+sessID+'_run'+str(run)+'_raw_stack.avi'
+            wp.make_movie_from_stack(frameArrayNorm,frameRate,outFile)
+    
+
+        #MOTION REGISTRATION
+        warpMatrices,motionMag=motion_registration(imRef,frameArray)
+
+        #-> plot motion magnitude (squared error from identity matrix) and save figure
+        fig=plt.figure()
+        plt.plot(frameTimes,motionMag)
+        fig.suptitle('Motion Over Time', fontsize=20)
+        plt.xlabel('Time (secs)',fontsize=16)
+        plt.ylabel('Motion Magnitude (AU)',fontsize=16)
+        plt.savefig(motionFigDir+sessID+'_run'+str(run)+'_motionMagnitude.png')
+        plt.close()
+
+        #-> save warp matrices
+        outFile=motionFileDir+sessID+'_run'+str(run)+'_motionRegistration'
+        np.savez(outFile,warpMatrices=warpMatrices)
+
+        #APPLY MOTION CORRECTION AND SAVE
+        correctedFrameArray=apply_motion_correction(frameArray,warpMatrices)
+        outFile=motionFileDir+sessID+'_run'+str(run)+'_correctedFrames'
+        np.savez(outFile,correctedFrameArray=correctedFrameArray)
+
+        #GET MOTION CORRECTED BOUNDARIES
+        edgeUpList,edgeDownList,edgeLeftList,edgeRightList = get_motion_corrected_boundaries(correctedFrameArray,warpMatrices)
+
+        if runCount==0:
+            edgeUp=np.max(edgeUpList)
+            edgeDown=np.min(edgeDownList)
+            edgeLeft=np.max(edgeLeftList)
+            edgeRight=np.min(edgeRightList)
+        else:
+            edgeUp=np.max([edgeUp,np.max(edgeUpList)])
+            edgeDown=np.min([edgeDown,np.min(edgeDownList)])
+            edgeLeft=np.max([edgeLeft,np.max(edgeLeftList)])
+            edgeRight=np.min([edgeRight,np.min(edgeRightList)])
+
+    boundaries=(edgeUp,edgeDown,edgeLeft,edgeRight)  
+    #->save boundaries
+    outFile=motionFileDir+sessID+'_motionCorrectedBoundaries'
+    np.savez(outFile,boundaries=boundaries)
+    
+    if makeMovies:
+        #APPLY BOUNDARIES
+        trimCorrectedFrameArray = apply_motion_correction_boundaries(correctedFrameArray,boundaries)
+
+        #GENRATE MOTION CORRECTED MOVIE
+        frameArrayNorm=normalize_stack(trimCorrectedFrameArray)
+        outFile=motionMovieDir+sessID+'run'+str(run)+'_MC_trimmed_stack.avi'
+        wp.make_movie_from_stack(frameArrayNorm,frameRate,outFile)
+
+# # # # # # # # # # # # # # # # # # # # # # # # # # # #
+
+# STAGE 1 -- DATA ANALYSIS FUNCTIONS
+
+# # # # # # # # # # # # # # # # # # # # # # # # # # # #
+
+def get_analysis_path(analysisRoot,interp=False, removeRollingMean=False, \
+    motionCorrection=False, smoothing=False, fwhm=0, \
+    timecourseAnalysis=False, baseline_startT=-2, baseline_endT=0, timecourse_startT=0, timecourse_endT=8,\
+     timeWindowAnalysis=False,tWindow1_startT=-2, tWindow1_endT=0, tWindow2_startT=0, tWindow2_endT=5):
+	#Cesar Echavarria 11/2016
+    
+    #MAKE SURE YOU GET SOME ARGUMENTS
+    if analysisRoot is None:
+        raise TypeError("analysisRoot (directory) not specified!")
+    imgOperationDir=''
+
+    #DEFINE DIRECTORIES
+    if motionCorrection:
+    	imgOperationDir=imgOperationDir+'motionCorrection_'
+
+    if smoothing:
+    	imgOperationDir=imgOperationDir+'smoothing_fwhm'+str(fwhm)
+    else:
+    	imgOperationDir=imgOperationDir+'noSmoothing'
+
+    procedureDir=''
+    if interpolate:
+        proceduredDir=procedureDir+'interpolate'
+
+    if removeRollingMean:
+        proceduredDir=procedureDir+'_minusRollingMean'
+
+    generalProcessDir=imgOpertationDir+'/'+procedureDir+'/'
+
+    tCourseDir=None
+    tWindowDir=None
+    if timeWindowAnalysis:
+        analysisDir=analysisRoot+'timeWindow/'+generalProcessDir
+        tWindowDir=analysisDir+'tWindow1_'+str(tWindow1_startT)+'_'+str(tWindow1_endT)+'_tWindow2_'+str(tWindow2_startT)+'_'+str(tWindow2_endT)+'/'
+        tWindowOutDir=tWindowDir+'MidProcOutput/'
+        
+    if timecourseAnalysis:
+        analysisDir=analysisRoot+'timeCourse/'+generalProcessDir
+        tCourseDir=analysisDir+'baseline_'+str(baseline_startT)+'_'+str(baseline_endT)+'_response_'+str(timecourse_startT)+'_'+str(timecourse_endT)+'/'
+
+        tCourseOutDir=tCourseDir+'MidProcOutput/'
+
+    return(tWindowOutDir,tCourseOutDir)
+
+
+def analyze_blocked_data(sourceRoot, targetRoot, sessID, runList, frameRate, \
+    interp=False, removeRollingMean=False, \
+    motionCorrection=False, smoothing=False, fwhm=0, \
+    timecourseAnalysis=False, baseline_startT=-2, baseline_endT=0, timecourse_startT=0, timecourse_endT=8,\
+     timeWindowAnalysis=False,tWindow1_startT=-2, tWindow1_endT=0, tWindow2_startT=0, tWindow2_endT=5,\
+     qualityControl=True):
+    #Cesar Echavarria 11/2016
     
     #MAKE SURE YOU GET SOME ARGUMENTS
     if sourceRoot is None:
@@ -114,27 +588,42 @@ def analyze_blocked_data(sourceRoot, targetRoot, sessID, runList, frameRate, tim
         raise TypeError("frameRate not specified!")
         
     # DEFINE DIRECTORIES
-    analysisFolder=targetRoot+'/Sessions/'+sessID+'/Analyses/';
+    analysisRoot=targetRoot+'/Sessions/'+sessID+'/Analyses/';
 
-    generalOutDir=analysisFolder+'/Analysis_interpolate_minusRollingMean_dsFactor'+str(dsFactor)+'_fwhm'+str(fwhm)+'_MC'+str(int(motionCorrection))+'/'
-    QCtargetFolder=targetRoot+'Sessions/'+sessID+'/QualControl/Figures/Data/'
-    
+    tWindowOutDir,tCourseOutDir=get_analysis_path(analysisRoot,interp, removeRollingMean, \
+    	motionCorrection, smoothing, fwhm, \
+    	timecourseAnalysis, baseline_startT, baseline_endT, timecourse_startT, timecourse_endT,\
+    	timeWindowAnalysis,tWindow1_startT, tWindow1_endT, tWindow2_startT, tWindow2_endT)
+
+    QCtargetFolder=targetRoot+'Sessions/'+sessID+'/QualControl/Figures/'
+
+    motionDir=targetRoot+'/Sessions/'+sessID+'/Motion/';
+    motionFileDir=motionDir+'Registration/'
+
+    #MAKE NECESSARY DIRECTORIES
     if timeWindowAnalysis:
-        tWindowOutDir=generalOutDir+'tWindow1_'+str(tWindow1_startT)+'_'+str(tWindow1_endT)+'_tWindow2_'+str(tWindow2_startT)+'_'+str(tWindow2_endT)+'/MidProcOutput/'
-        if not os.path.exists(tWindowOutDir):
-            os.makedirs(tWindowOutDir)  
-    if timecourseAnalysis:
-        tCourseOutDir=generalOutDir+'baseline_'+str(baseline_startT)+'_'+str(baseline_endT)+'_response_'+str(timecourse_startT)+'_'+str(timecourse_endT)+'/MidProcOutput/'
-        if not os.path.exists(tCourseOutDir):
-            os.makedirs(tCourseOutDir)  
-                                   
+	    if not os.path.exists(tWindowOutDir):
+	            os.makedirs(tWindowOutDir)
+        #OUTPUT TEXT FILE WITH PACKAGE VERSION
+		outFile=tWindowOutDir+'analysis_version_info.txt'
+		f = open(outFile, 'w+')
+		f.write(__version__+'\n')
+		f.close()
 
-    runCount=-1
+	if timecourseAnalysis:
+	    if not os.path.exists(tCourseOutDir):
+	            os.makedirs(tCourseOutDir) 
+	    #OUTPUT TEXT FILE WITH PACKAGE VERSION
+		outFile=tWindowOutDir+'analysis_version_info.txt'
+		f = open(outFile, 'w+')
+		f.write(__version__+'\n')
+		f.close() 
 
-    for run in runList:
+
+    #BEGIN DATA PROCESSING
+    for (runCount,run) in enumerate(runList):
 
         print('run='+str(run))
-        runCount+=1
 
         runFolder=glob.glob(sourceRoot+sessID+'_run'+str(run)+'_*')
 
@@ -146,24 +635,37 @@ def analyze_blocked_data(sourceRoot, targetRoot, sessID, runList, frameRate, tim
         # READ IN BLOCK PARADIGM
         blockCond,blockStartT,nBlocks=get_block_paradigm(planFolder)
 
-        # READ IN FRAMES
+        # READ IN FIRST FRAME FOR SIZE
         imFile=frameFolder+'frame0.tiff'
         im0=misc.imread(imFile)
         sz=im0.shape
 
+        # ***TO DO - APPLY SMOOTHING***
 
-        if qualityControl:
-            #STORE PIXEL VALUES OF FIRST FRAME
-            if runCount==0:
-                frame1PixMat=np.zeros((sz[0]*sz[1],len(runList)))
-            frame1PixMat[:,runCount]=np.reshape(im0,sz[0]*sz[1])
+        if motionCorrection:
 
-        frameArray=np.zeros(sz+(frameCount,))
-        frameArray[:,:,0]=im0
-        for f in range (1,frameCount):
-            imFile=frameFolder+'frame'+str(f)+'.tiff'
-            im0=misc.imread(imFile)
-            frameArray[:,:,f]=im0[:,:]
+            #LOAD MOTION CORRECTED FRAMES
+            inFile=outFile=motionFileDir+sessID+'_run'+str(run)+'_correctedFrames.npz'
+            f=np.load(inFile)
+            frameArray=f['correctedFrameArray']
+
+            #LOAD MOTION CORRECTED BOUNDARIES
+            inFile=motionFileDir+sessID+'_motionCorrectedBoundaries.npz'
+            f=np.load(inFile)
+            boundaries=f['boundaries']
+
+            #APPLY BOUNDARIES
+            frameArray = apply_motion_correction_boundaries(frameArray,boundaries)
+
+        else:
+            # READ IN FRAMES
+            frameArray=np.zeros(sz+(frameCount,))
+            frameArray[:,:,0]=im0
+            for f in range (1,frameCount):
+                imFile=frameFolder+'frame'+str(f)+'.tiff'
+                im0=misc.imread(imFile)
+                frameArray[:,:,f]=im0[:,:]
+
         frameArray=np.reshape(frameArray,(sz[0]*sz[1],frameCount))
 
         if qualityControl:
@@ -178,7 +680,8 @@ def analyze_blocked_data(sourceRoot, targetRoot, sessID, runList, frameRate, tim
             fig.suptitle('Mean Pixel Value Over Time', fontsize=20)
             plt.xlabel('Time (secs)',fontsize=16)
             plt.ylabel('Mean Pixel Value',fontsize=16)
-            plt.savefig(QCtargetFolder+'run'+str(run)+'meanPixelValue.png')
+            plt.savefig(QCtargetFolder+sessID+'_run'+str(run)+'meanPixelValue.png')
+            plt.close()
 
             randPix=np.random.randint(0,sz[0]*sz[1])
 
@@ -188,7 +691,8 @@ def analyze_blocked_data(sourceRoot, targetRoot, sessID, runList, frameRate, tim
             fig.suptitle('Pixel '+str(randPix)+' Value Over Time', fontsize=20)
             plt.xlabel('Time (secs)',fontsize=16)
             plt.ylabel('Mean Pixel Value',fontsize=16)
-            plt.savefig(QCtargetFolder+'run'+str(run)+'randomPixelValue.png')
+            plt.savefig(QCtargetFolder+sessID+'+run'+str(run)+'randomPixelValue.png')
+            plt.close()
 
         # INTERPOLATE FOR CONSTANT FRAME RATE
         interpF = interpolate.interp1d(frameTimes, frameArray,1)
@@ -256,17 +760,18 @@ def analyze_blocked_data(sourceRoot, targetRoot, sessID, runList, frameRate, tim
 
 
     if qualityControl:
-        R=np.corrcoef(np.transpose(frame1PixMat))   
+        R=get_first_frame_correlation(sourceRoot,sessID,runList)
         fig=plt.figure()
         plt.imshow(R,interpolation='none')
         plt.colorbar()
-        plt.savefig(QCtargetFolder+'firstFrame_CorrelationMatrix.png')
+        plt.savefig(QCtargetFolder+sessID+'_firstFrame_CorrelationMatrix.png')
+        plt.close()
+        
+    return (tCourseDir,tWindowDir)
 
         
-def average_trials_timecourse(sourceRoot, targetRoot, sessID, nCond, runList, avgFolder,\
-                           baseline_startT=-2, baseline_endT=0,\
-                           timecourse_startT=0, timecourse_endT=5, motionCorrection=False, dsFactor=1, fwhm=0,\
-                          percentSignalChange=True, SDmaps=False):
+def average_trials_timecourse(sourceRoot, targetRoot, analysisDir, sessID, nCond, runList, avgFolder,\
+    percentSignalChange=True, SDmaps=False):
     
     #MAKE SURE YOU GET SOME ARGUMENTS
     if sourceRoot is None:
@@ -279,16 +784,13 @@ def average_trials_timecourse(sourceRoot, targetRoot, sessID, nCond, runList, av
         raise TypeError("sessID not specified!")
     if nCond is None:
         raise TypeError("nCond (number of conditions) not specified!")
+    if analysisDir is None:
+        raise TypeError("analysisDir (directory) not specified!")
     if avgFolder is None:
         raise TypeError("avgFolder not specified!")
 
+
     # DEFINE DIRECTORIES
-    analysisRoot=targetRoot+'/Sessions/'+sessID+'/Analyses/';
-
-    analysisDir=analysisRoot+'/Analysis_interpolate_minusRollingMean_dsFactor'+str(dsFactor)+'_fwhm'+str(fwhm)+\
-    '_MC'+str(int(motionCorrection))+'/'+'baseline_'+str(baseline_startT)+'_'+str(baseline_endT)+'_response_'\
-    +str(timecourse_startT)+'_'+str(timecourse_endT)+'/'
-
     inDir=analysisDir+'/MidProcOutput/'
     outDir=analysisDir+'/AnalysisOutput/'+avgFolder+'/';
     if not os.path.exists(outDir):
@@ -298,6 +800,12 @@ def average_trials_timecourse(sourceRoot, targetRoot, sessID, nCond, runList, av
         figOutDir=analysisDir+'/Figures/'+avgFolder+'/SDmaps/'
         if not os.path.exists(figOutDir):
             os.makedirs(figOutDir) 
+
+    #OUTPUT TEXT FILE WITH PACKAGE VERSION
+    outFile=outDir+'analysis_version_info.txt'
+    f = open(outFile, 'w+')
+    f.write(__version__+'\n')
+    f.close()
 
 
     # READ IN FRAME FOR IMAGE SIZE
@@ -373,262 +881,22 @@ def average_trials_timecourse(sourceRoot, targetRoot, sessID, nCond, runList, av
             fig=plt.figure()
             plt.imshow(mapSD[:,:,c])
             plt.colorbar()
-            plt.savefig(figOutDir+contrastDic[c]['name']+'_SDmap.png')
+            plt.savefig(figOutDir+sessID+'_'+contrastDic[c]['name']+'_SDmap.png')
+            plt.close()
 
         outFile=outDir+sessID+'_mapSD'
         np.savez(outFile,mapSD=mapSD)
         
-def make_pixel_plots(sourceRoot, targetRoot, sessID, frameRate, avgFolder,\
-                                       baseline_startT=-2, baseline_endT=0,\
-                                       timecourse_startT=0, timecourse_endT=8, nPix=100,\
-                                       motionCorrection=False, dsFactor=1, fwhm=0):
 
-    #Cesar Echavarria 10/2016
-    
-    #MAKE SURE YOU GET SOME ARGUMENTS
-    if sourceRoot is None:
-        raise TypeError("sourceRoot (directory) not specified!")
-    if targetRoot is None:
-        raise TypeError("targetRoot (directory) not specified!")
-    if sessID is None:
-        raise TypeError("sessID not specified!")
-    if frameRate is None:
-        raise TypeError("frameRate not specified!")
-    if avgFolder is None:
-        raise TypeError("avgFolder not specified!")
-        
-    # DEFINE DIRECTORIES
-    analysisRoot=targetRoot+'/Sessions/'+sessID+'/Analyses/';
-
-    analysisDir=analysisRoot+'/Analysis_interpolate_minusRollingMean_dsFactor'+str(dsFactor)+'_fwhm'+str(fwhm)+\
-    '_MC'+str(int(motionCorrection))+'/'+'baseline_'+str(baseline_startT)+'_'+str(baseline_endT)+'_response_'\
-    +str(timecourse_startT)+'_'+str(timecourse_endT)+'/'
-
-    inDir=analysisDir+'/AnalysisOutput/'+avgFolder+'/';
-
-    figOutDir=analysisDir+'/Figures/'+avgFolder+'/timecourse_singlePixel/'
-    if not os.path.exists(figOutDir):
-        os.makedirs(figOutDir) 
-
-    #LOAD IN STANDARD DEV MAP
-    inFile=inDir+sessID+'_mapSD.npz'
-    f=np.load(inFile)
-    mapSD=f['mapSD']
-
-    #GET PIXELS WITH MOST VARIANCE (MAYBE BEST SIGNAL)
-    szY,szX,nCond=np.shape(mapSD)
-    pixSD=np.reshape(mapSD,(szY*szX*nCond))
-
-    pixList=np.unique(np.argsort(pixSD).argsort()[::-1][:nPix]%(szY*szX))
-
-    #LOAD IN TIME COURSE AND RELATED PARAMETERS
-    inFile=inDir+sessID+'_timecourse_trialAvg.npz'
-    f=np.load(inFile)
-    startT=f['timecourse_startT']
-    frameRate=f['frameRate']
-    stimRespMean=f['stimRespMean']
-    sampRate=np.true_divide(1,frameRate)
-
-    #LOAD IN DICTIONARY WITH CONTRAST DEFINITIONS
-    inFile=targetRoot+'contrastDic.npz'
-    f=np.load(inFile)
-    contrastDic=f['contrastDic']
-
-    #GET SOME INFO ABOUT DATA
-    nPix,nCond,respPts=np.shape(stimRespMean)
-    frameTimes=np.linspace(startT,startT+(respPts)*sampRate,respPts)
-
-    #MAKE PLOTS
-    colorList='bgrmkc'
-    for pix in pixList:
-        legHand=[]
-        fig=plt.figure()
-        for c in range(0,nCond):
-            plt.plot(frameTimes,stimRespMean[pix,c,:],colorList[c],linewidth=2)
-
-            endInd=contrastDic[c]['name'].index('_')
-            legHand.append(mlines.Line2D([], [], color=colorList[c], marker='_',
-                                  markersize=15, label=contrastDic[c]['name'][0:endInd]))
-        plt.legend(handles=legHand)
-
-        axes = plt.gca()
-        ymin, ymax = axes.get_ylim()
-        plt.axvline(x=0, ymin=ymin, ymax = ymax, linewidth=1, color='k')
-        plt.axvline(x=5, ymin=ymin, ymax = ymax, linewidth=1, color='r')
-
-        fig.suptitle('Pixel '+str(pix)+' Value Over Time', fontsize=16)
-        plt.xlabel('Time (secs)',fontsize=16)
-        plt.ylabel('PSC',fontsize=16)
-        plt.savefig(figOutDir+'pixel_'+str(pix)+'_timecourse_trialAvg.png')
-        
-        
-def make_movie_from_stack(frameStack,frameRate=24,movFile='test.avi'):
-    #Cesar Echavarria 10/2016
-    
-    #CHECK INPUTS
-    if frameStack is None:
-        raise TypeError("no frame stack provided!")
-    if np.amax(frameStack) > 1:
-        raise TypeError("frame stack values must be in the range 0-1")
-    
-    
-    #GET STACK INFO
-    szY,szX,nFrames=np.shape(frameStack)
-
-    #MAKE TEMP FOLDER
-    tmpDir='./tmp/'
-    if not os.path.exists(tmpDir):
-        os.makedirs(tmpDir)
-
-
-    #WRITE TO TEMP FOLDER
-    for i in range(0,nFrames):
-        outFile=tmpDir+str(i)+'.png'
-        frame=np.uint8(frameStack[:,:,i]*255)
-        misc.imsave(outFile,frame)
-
-    #WRITE VIDEO
-    cmd='ffmpeg -y -r '+'%.3f'%frameRate+' -i '+tmpDir+'%d.png -vcodec mjpeg -f avi '+movFile
-    os.system(cmd)
-
-
-    #GET RID OF TEMP FOLDER
-    shutil.rmtree(tmpDir)
-    
-                                    
-def make_movie_from_stack_mark_stim(frameStack,frameRate=24,onFrame=0,offFrame=None,movFile='test.avi'):
-    #Cesar Echavarria 10/2016
-    
-    #CHECK INPUTS
-    if frameStack is None:
-        raise TypeError("no frame stack provided!")
-    if np.amax(frameStack) > 1:
-        raise TypeError("frame stack values must be in the range 0-1")
-    
-    
-    #GET STACK INFO
-    szY,szX,nFrames=np.shape(frameStack)
-
-    #MAKE TEMP FOLDER
-    tmpDir='./tmp/'
-    if not os.path.exists(tmpDir):
-        os.makedirs(tmpDir)
-
-
-    #WRITE TO TEMP FOLDER
-    for i in range(0,nFrames):
-        outFile=tmpDir+str(i)+'.png'
-        frame=np.copy(frameStack[:,:,i])
-        if offFrame is None:
-            if i >= onFrame:
-                frame=np.pad(frame,(5,), 'constant', constant_values=(1,))
-            else:
-                frame=np.pad(frame,(5,), 'constant', constant_values=(0,))
-        else:
-            if i >= onFrame and i<offFrame:
-                frame=np.pad(frame,(5,), 'constant', constant_values=(1,))
-            else:
-                frame=np.pad(frame,(5,), 'constant', constant_values=(0,))
-        frame=np.uint8(frame*255)
-        misc.imsave(outFile,frame)
-
-    #WRITE VIDEO
-    cmd='ffmpeg -y -r '+'%.3f'%frameRate+' -i '+tmpDir+'%d.png -vcodec mjpeg '+movFile
-    os.system(cmd)
-
-
-    #GET RID OF TEMP FOLDER
-    shutil.rmtree(tmpDir)  
-    
-def make_movie_from_timecourse_average(sourceRoot, targetRoot, sessID, frameRate, avgFolder,\
-                                       baseline_startT=-2, baseline_endT=0,\
-                                       timecourse_startT=0, timecourse_endT=8, stimDur=5,\
-                                       motionCorrection=False, dsFactor=1, fwhm=0):
-    #Cesar Echavarria 10/2016
-    
-    #MAKE SURE YOU GET SOME ARGUMENTS
-    if sourceRoot is None:
-        raise TypeError("sourceRoot (directory) not specified!")
-    if targetRoot is None:
-        raise TypeError("targetRoot (directory) not specified!")
-    if sessID is None:
-        raise TypeError("sessID not specified!")
-    if frameRate is None:
-        raise TypeError("frameRate not specified!")
-    if avgFolder is None:
-        raise TypeError("avgFolder not specified!")
-        
-    # DEFINE DIRECTORIES
-    analysisRoot=targetRoot+'/Sessions/'+sessID+'/Analyses/';
-
-    analysisDir=analysisRoot+'/Analysis_interpolate_minusRollingMean_dsFactor'+str(dsFactor)+'_fwhm'+str(fwhm)+\
-    '_MC'+str(int(motionCorrection))+'/'+'baseline_'+str(baseline_startT)+'_'+str(baseline_endT)+'_response_'\
-    +str(timecourse_startT)+'_'+str(timecourse_endT)+'/'
-
-    inDir=analysisDir+'/AnalysisOutput/'+avgFolder+'/';
-
-    movieOutDir=analysisDir+'/Movies/'+avgFolder+'/'
-    if not os.path.exists(movieOutDir):
-        os.makedirs(movieOutDir) 
-
-    #READ IN FRAME FOR IMAGE SIZE
-    runFolder=glob.glob(sourceRoot+sessID+'_run1_*')
-    frameFolder=runFolder[0]+"/frames/"
-
-    imFile=frameFolder+'frame0.tiff'
-    im0=misc.imread(imFile)
-    szY,szX=im0.shape
-
-
-    #LOAD IN TIME COURSE AND RELATED PARAMETERS
-    inFile=inDir+sessID+'_timecourse_trialAvg.npz'
-    f=np.load(inFile)
-    startT=f['timecourse_startT']
-    frameRate=f['frameRate']
-    stimRespMean=f['stimRespMean']
-    sampRate=np.true_divide(1,frameRate)
-
-    nPix,nCond,respPts=np.shape(stimRespMean)
-
-    #LOAD IN DICTIONARY WITH CONTRAST DEFINITIONS
-    inFile=targetRoot+'contrastDic.npz'
-    f=np.load(inFile)
-    contrastDic=f['contrastDic']
-
-    #GET SOME INFO ABOUT DATA
-    nPix,nCond,respPts=np.shape(stimRespMean)
-    frameTimes=np.linspace(startT,startT+(respPts)*sampRate,respPts)
-
-    onFrame=np.where(frameTimes>baseline_endT)[0][0]
-    offFrame=np.where(frameTimes>stimDur)[0][0]
-
-
-    for c in range(0,nCond):
-        #NORMALIZE ARRAY
-        frameArray=stimRespMean[:,c,:]
-        arrayMin=np.amin(frameArray)
-        arrayMax=np.amax(frameArray)
-        frameArray=np.true_divide((frameArray-arrayMin),(arrayMax-arrayMin))
-
-        #RESHAPE
-        frameArray=np.reshape(frameArray,(szY,szX,respPts))
-
-
-        #MAKE MOVIE
-        endInd=contrastDic[c]['name'].index('_')
-        outFile=movieOutDir+contrastDic[c]['name'][0:endInd]+'_movie.avi'
-        #make_movie_from_stack(frameArray,frameRate=frameRate,movFile=outFile)
-        make_movie_from_stack_mark_stim(frameArray,frameRate=frameRate,onFrame=onFrame,offFrame=offFrame,movFile=outFile)
-
-def average_trials_tWindow(sourceRoot, targetRoot, sessID, nCond, runList, avgFolder,\
-                           tWindow1_startT=-2, tWindow1_endT=0,\
-                           tWindow2_startT=0, tWindow2_endT=5, motionCorrection=False, dsFactor=1, fwhm=0,\
+def average_trials_tWindow(sourceRoot, targetRoot, sessID, nCond, runList, analysisDir, avgFolder,\
                           retinoAnalysis=False,percentSignalChange=False, parametricStat=False):
     #MAKE SURE YOU GET SOME ARGUMENTS
     if sourceRoot is None:
         raise TypeError("sourceRoot (directory) not specified!")
     if targetRoot is None:
         raise TypeError("targetRoot (directory) not specified!")
+    if analysisDir is None:
+        raise TypeError("analysisDir (directory) not specified!")
     if runList is None:
         raise TypeError("runList not specified!")
     if sessID is None:
@@ -637,18 +905,20 @@ def average_trials_tWindow(sourceRoot, targetRoot, sessID, nCond, runList, avgFo
         raise TypeError("nCond (number of conditions) not specified!")
     if avgFolder is None:
         raise TypeError("avgFolder not specified!")
+
+ 
     
     # DEFINE DIRECTORIES
-    analysisRoot=targetRoot+'/Sessions/'+sessID+'/Analyses/';
-
-    analysisDir=analysisRoot+'/Analysis_interpolate_minusRollingMean_dsFactor'+str(dsFactor)+'_fwhm'+str(fwhm)+\
-    '_MC'+str(int(motionCorrection))+'/''tWindow1_'+str(tWindow1_startT)+'_'+str(tWindow1_endT)+'_tWindow2_'\
-    +str(tWindow2_startT)+'_'+str(tWindow2_endT)+'/'
-
     inDir=analysisDir+'/MidProcOutput/'
     outDir=analysisDir+'/AnalysisOutput/'+avgFolder+'/';
     if not os.path.exists(outDir):
         os.makedirs(outDir) 
+
+    #OUTPUT TEXT FILE WITH PACKAGE VERSION
+    outFile=outDir+'analysis_version_info.txt'
+    f = open(outFile, 'w+')
+    f.write(__version__+'\n')
+    f.close()
 
 
     # READ IN FRAME FOR IMAGE SIZE
@@ -753,27 +1023,245 @@ def average_trials_tWindow(sourceRoot, targetRoot, sessID, nCond, runList, avgFo
                     outFile=outDir+sessID+'_'+contrastDic[c]['name']+'_SPMmap'
                     np.savez(outFile,tStatMap=tStatMap,pValMap=pValMap);
                     
-def array2cmap(X):
-    N = X.shape[0]
 
-    r = np.linspace(0., 1., N+1)
-    r = np.sort(np.concatenate((r, r)))[1:-1]
+# # # # # # # # # # # # # # # # # # # # # # # # # # # #
 
-    rd = np.concatenate([[X[i, 0], X[i, 0]] for i in xrange(N)])
-    gr = np.concatenate([[X[i, 1], X[i, 1]] for i in xrange(N)])
-    bl = np.concatenate([[X[i, 2], X[i, 2]] for i in xrange(N)])
+# VISUALIZATION FUNCTIONS
 
-    rd = tuple([(r[i], rd[i], rd[i]) for i in xrange(2 * N)])
-    gr = tuple([(r[i], gr[i], gr[i]) for i in xrange(2 * N)])
-    bl = tuple([(r[i], bl[i], bl[i]) for i in xrange(2 * N)])
+# # # # # # # # # # # # # # # # # # # # # # # # # # # #
+
+def make_pixel_plots(sourceRoot, targetRoot, sessID, frameRate, analysisDir, avgFolder, nPix=100):
+
+    #Cesar Echavarria 10/2016
+    
+    #MAKE SURE YOU GET SOME ARGUMENTS
+    if sourceRoot is None:
+        raise TypeError("sourceRoot (directory) not specified!")
+    if targetRoot is None:
+        raise TypeError("targetRoot (directory) not specified!")
+    if sessID is None:
+        raise TypeError("sessID not specified!")
+    if frameRate is None:
+        raise TypeError("frameRate not specified!")
+    if analysisDir is None:
+        raise TypeError("analysisDir (directory) not specified!")
+    if avgFolder is None:
+        raise TypeError("avgFolder not specified!")
+        
+    # DEFINE DIRECTORIES
+    inDir=analysisDir+'/AnalysisOutput/'+avgFolder+'/';
+
+    figOutDir=analysisDir+'/Figures/'+avgFolder+'/timecourse_singlePixel/'
+    if not os.path.exists(figOutDir):
+        os.makedirs(figOutDir) 
+
+    #LOAD IN STANDARD DEV MAP
+    inFile=inDir+sessID+'_mapSD.npz'
+    f=np.load(inFile)
+    mapSD=f['mapSD']
+
+    #GET PIXELS WITH MOST VARIANCE (MAYBE BEST SIGNAL)
+    szY,szX,nCond=np.shape(mapSD)
+    pixSD=np.reshape(mapSD,(szY*szX*nCond))
+
+    pixList=np.unique(np.argsort(pixSD).argsort()[::-1][:nPix]%(szY*szX))
+
+    #LOAD IN TIME COURSE AND RELATED PARAMETERS
+    inFile=inDir+sessID+'_timecourse_trialAvg.npz'
+    f=np.load(inFile)
+    startT=f['timecourse_startT']
+    frameRate=f['frameRate']
+    stimRespMean=f['stimRespMean']
+    sampRate=np.true_divide(1,frameRate)
+
+    #LOAD IN DICTIONARY WITH CONTRAST DEFINITIONS
+    inFile=targetRoot+'contrastDic.npz'
+    f=np.load(inFile)
+    contrastDic=f['contrastDic']
+
+    #GET SOME INFO ABOUT DATA
+    nPix,nCond,respPts=np.shape(stimRespMean)
+    frameTimes=np.linspace(startT,startT+(respPts)*sampRate,respPts)
+
+    #MAKE PLOTS
+    colorList='bgrmkc'
+    for pix in pixList:
+        legHand=[]
+        fig=plt.figure()
+        for c in range(0,nCond):
+            plt.plot(frameTimes,stimRespMean[pix,c,:],colorList[c],linewidth=2)
+
+            endInd=contrastDic[c]['name'].index('_')
+            legHand.append(mlines.Line2D([], [], color=colorList[c], marker='_',
+                                  markersize=15, label=contrastDic[c]['name'][0:endInd]))
+        plt.legend(handles=legHand)
+
+        axes = plt.gca()
+        ymin, ymax = axes.get_ylim()
+        plt.axvline(x=0, ymin=ymin, ymax = ymax, linewidth=1, color='k')
+        plt.axvline(x=5, ymin=ymin, ymax = ymax, linewidth=1, color='r')
+
+        fig.suptitle(sessID+' Pixel '+str(pix)+' Value Over Time', fontsize=16)
+        plt.xlabel('Time (secs)',fontsize=16)
+        plt.ylabel('PSC',fontsize=16)
+        plt.savefig(figOutDir+sessID+'+pixel_'+str(pix)+'_timecourse_trialAvg.png')
+        plt.close()
+        
+        
+def make_movie_from_stack(frameStack,frameRate=24,movFile='test.avi'):
+    #Cesar Echavarria 10/2016
+    
+    #CHECK INPUTS
+    if frameStack is None:
+        raise TypeError("no frame stack provided!")
+    if np.amax(frameStack) > 1:
+        raise TypeError("frame stack values must be in the range 0-1")
+    
+    
+    #GET STACK INFO
+    szY,szX,nFrames=np.shape(frameStack)
+
+    #MAKE TEMP FOLDER
+    tmpDir='./tmp/'
+    if not os.path.exists(tmpDir):
+        os.makedirs(tmpDir)
 
 
-    cdict = {'red': rd, 'green': gr, 'blue': bl}
-    return colors.LinearSegmentedColormap('my_colormap', cdict, N)
+    #WRITE TO TEMP FOLDER
+    for i in range(0,nFrames):
+        outFile=tmpDir+str(i)+'.png'
+        frame=np.uint8(frameStack[:,:,i]*255)
+        misc.imsave(outFile,frame)
 
-def generate_PSC_map(sourceRoot,sessID,avgFolder,tWindow1_startT=-2, tWindow1_endT=0,\
-                            tWindow2_startT=0, tWindow2_endT=5, motionCorrection=False, dsFactor=1, fwhm=0,\
-                            manualThresh = False, threshMin = 1, threshMax = 3):
+    #WRITE VIDEO
+    cmd='ffmpeg -y -r '+'%.3f'%frameRate+' -i '+tmpDir+'%d.png -vcodec mjpeg -f avi '+movFile
+    os.system(cmd)
+
+
+    #GET RID OF TEMP FOLDER
+    shutil.rmtree(tmpDir)
+    
+                                    
+def make_movie_from_stack_mark_stim(frameStack,frameRate=24,onFrame=0,offFrame=None,movFile='test.avi'):
+    #Cesar Echavarria 10/2016
+    
+    #CHECK INPUTS
+    if frameStack is None:
+        raise TypeError("no frame stack provided!")
+    if np.amax(frameStack) > 1:
+        raise TypeError("frame stack values must be in the range 0-1")
+    
+    
+    #GET STACK INFO
+    szY,szX,nFrames=np.shape(frameStack)
+
+    #MAKE TEMP FOLDER
+    tmpDir='./tmp/'
+    if not os.path.exists(tmpDir):
+        os.makedirs(tmpDir)
+
+
+    #WRITE TO TEMP FOLDER
+    for i in range(0,nFrames):
+        outFile=tmpDir+str(i)+'.png'
+        frame=np.copy(frameStack[:,:,i])
+        if offFrame is None:
+            if i >= onFrame:
+                frame=np.pad(frame,(5,), 'constant', constant_values=(1,))
+            else:
+                frame=np.pad(frame,(5,), 'constant', constant_values=(0,))
+        else:
+            if i >= onFrame and i<offFrame:
+                frame=np.pad(frame,(5,), 'constant', constant_values=(1,))
+            else:
+                frame=np.pad(frame,(5,), 'constant', constant_values=(0,))
+        frame=np.uint8(frame*255)
+        misc.imsave(outFile,frame)
+
+    #WRITE VIDEO
+    cmd='ffmpeg -y -r '+'%.3f'%frameRate+' -i '+tmpDir+'%d.png -vcodec mjpeg '+movFile
+    os.system(cmd)
+
+
+    #GET RID OF TEMP FOLDER
+    shutil.rmtree(tmpDir)  
+    
+def make_movie_from_timecourse_average(sourceRoot, targetRoot, sessID, frameRate, analysisDir, avgFolder):
+    #Cesar Echavarria 10/2016
+    
+    #MAKE SURE YOU GET SOME ARGUMENTS
+    if sourceRoot is None:
+        raise TypeError("sourceRoot (directory) not specified!")
+    if targetRoot is None:
+        raise TypeError("targetRoot (directory) not specified!")
+    if sessID is None:
+        raise TypeError("sessID not specified!")
+    if frameRate is None:
+        raise TypeError("frameRate not specified!")
+    if analysisDir is None:
+        raise TypeError("analysisDir (directory) not specified!")
+    if avgFolder is None:
+        raise TypeError("avgFolder not specified!")
+        
+    # DEFINE DIRECTORIES
+    inDir=analysisDir+'/AnalysisOutput/'+avgFolder+'/';
+
+    movieOutDir=analysisDir+'/Movies/'+avgFolder+'/'
+    if not os.path.exists(movieOutDir):
+        os.makedirs(movieOutDir) 
+
+    #READ IN FRAME FOR IMAGE SIZE
+    runFolder=glob.glob(sourceRoot+sessID+'_run1_*')
+    frameFolder=runFolder[0]+"/frames/"
+
+    imFile=frameFolder+'frame0.tiff'
+    im0=misc.imread(imFile)
+    szY,szX=im0.shape
+
+
+    #LOAD IN TIME COURSE AND RELATED PARAMETERS
+    inFile=inDir+sessID+'_timecourse_trialAvg.npz'
+    f=np.load(inFile)
+    startT=f['timecourse_startT']
+    frameRate=f['frameRate']
+    stimRespMean=f['stimRespMean']
+    sampRate=np.true_divide(1,frameRate)
+
+    nPix,nCond,respPts=np.shape(stimRespMean)
+
+    #LOAD IN DICTIONARY WITH CONTRAST DEFINITIONS
+    inFile=targetRoot+'contrastDic.npz'
+    f=np.load(inFile)
+    contrastDic=f['contrastDic']
+
+    #GET SOME INFO ABOUT DATA
+    nPix,nCond,respPts=np.shape(stimRespMean)
+    frameTimes=np.linspace(startT,startT+(respPts)*sampRate,respPts)
+
+    onFrame=np.where(frameTimes>baseline_endT)[0][0]
+    offFrame=np.where(frameTimes>stimDur)[0][0]
+
+
+    for c in range(0,nCond):
+        #NORMALIZE ARRAY
+        frameArray=stimRespMean[:,c,:]
+        arrayMin=np.amin(frameArray)
+        arrayMax=np.amax(frameArray)
+        frameArray=np.true_divide((frameArray-arrayMin),(arrayMax-arrayMin))
+
+        #RESHAPE
+        frameArray=np.reshape(frameArray,(szY,szX,respPts))
+
+
+        #MAKE MOVIE
+        endInd=contrastDic[c]['name'].index('_')
+        outFile=movieOutDir+movFile+'_'+contrastDic[c]['name'][0:endInd]+'_movie.avi'
+        #make_movie_from_stack(frameArray,frameRate=frameRate,movFile=outFile)
+        make_movie_from_stack_mark_stim(frameArray,frameRate=frameRate,onFrame=onFrame,offFrame=offFrame,movFile=outFile)
+
+
+def generate_PSC_map(sourceRoot,sessID,analysisDir,avgFolder,\
+    manualThresh = False, threshMin = 1, threshMax = 3):
     #Cesar Echavarria - 10/2016
     
     #VERIFY WE GOT NECESSARY VALUES
@@ -781,16 +1269,13 @@ def generate_PSC_map(sourceRoot,sessID,avgFolder,tWindow1_startT=-2, tWindow1_en
         raise TypeError("sourceRoot (directory) not specified!")
     if sessID is None:
         raise TypeError("sessID not specified!")
-        if avgFolder is None:
-            raise TypeError("avgFolder not specified!")
+    if analysisDir is None:
+        raise TypeError("analysisDir (directory) not specified!")
+    if avgFolder is None:
+        raise TypeError("avgFolder not specified!")
 
         
     # DEFINE DIRECTORIES
-    analysisRoot=sourceRoot+'/Sessions/'+sessID+'/Analyses/';
-    analysisDir=analysisRoot+'/Analysis_interpolate_minusRollingMean_dsFactor'+str(dsFactor)+'_fwhm'+str(fwhm)+\
-    '_MC'+str(int(motionCorrection))+'/''tWindow1_'+str(tWindow1_startT)+'_'+str(tWindow1_endT)+'_tWindow2_'\
-    +str(tWindow2_startT)+'_'+str(tWindow2_endT)+'/'
-
     anatSource=sourceRoot+'Sessions/'+sessID+'/Surface/'
     resultsDir=analysisDir+'/AnalysisOutput/'+avgFolder+'/'
     if manualThresh:
@@ -909,16 +1394,15 @@ def generate_PSC_map(sourceRoot,sessID,avgFolder,tWindow1_startT=-2, tWindow1_en
         cb.set_ticks(tickLoc)
         cb.set_ticklabels(tickLabels)
 
-        plt.savefig(outDir+contrastDic[c]['name']+'_withColorbar.png')
+        plt.savefig(outDir+sessID+'_'+contrastDic[c]['name']+'_withColorbar.png')
 
-        outFile=outDir+contrastDic[c]['name']+'_image.png'
+        outFile=outDir+sessID+'_'+contrastDic[c]['name']+'_image.png'
         misc.imsave(outFile,np.uint8(funcOverlay))
 
         plt.clf()
         
-def generate_SPM(sourceRoot,sessID,avgFolder,tWindow1_startT=-2, tWindow1_endT=0,\
-                            tWindow2_startT=0, tWindow2_endT=5, motionCorrection=False, dsFactor=1, fwhm=0,\
-                            manualThresh = False, threshMin = 1, threshMax = 3):
+def generate_SPM(sourceRoot,sessID,analysisDir,avgFolder,\
+    manualThresh = False, threshMin = 1, threshMax = 3):
     #Cesar Echavarria - 10/2016
     
     #VERIFY WE GOT NECESSARY VALUES
@@ -926,15 +1410,12 @@ def generate_SPM(sourceRoot,sessID,avgFolder,tWindow1_startT=-2, tWindow1_endT=0
         raise TypeError("sourceRoot (directory) not specified!")
     if sessID is None:
         raise TypeError("sessID not specified!")
+    if analysisDir is None:
+        raise TypeError("analysisDir (directory) not specified!")
     if avgFolder is None:
         raise TypeError("avgFolder not specified!")
         
     # DEFINE DIRECTORIES
-    analysisRoot=sourceRoot+'/Sessions/'+sessID+'/Analyses/';
-    analysisDir=analysisRoot+'/Analysis_interpolate_minusRollingMean_dsFactor'+str(dsFactor)+'_fwhm'+str(fwhm)+\
-    '_MC'+str(int(motionCorrection))+'/''tWindow1_'+str(tWindow1_startT)+'_'+str(tWindow1_endT)+'_tWindow2_'\
-    +str(tWindow2_startT)+'_'+str(tWindow2_endT)+'/'
-
     anatSource=sourceRoot+'Sessions/'+sessID+'/Surface/'
     resultsDir=analysisDir+'/AnalysisOutput/'+avgFolder+'/'
     if manualThresh:
@@ -1061,33 +1542,30 @@ def generate_SPM(sourceRoot,sessID,avgFolder,tWindow1_startT=-2, tWindow1_endT=0
         cb.set_ticks(tickLoc)
         cb.set_ticklabels(tickLabels)
 
-        plt.savefig(outDir+contrastDic[c]['name']+'_withColorbar.png')
+        plt.savefig(outDir+sessID+'+'+contrastDic[c]['name']+'_withColorbar.png')
 
-        outFile=outDir+contrastDic[c]['name']+'_image.png'
+        outFile=outDir+sessID+'_'+contrastDic[c]['name']+'_image.png'
         misc.imsave(outFile,np.uint8(funcOverlay))
 
         plt.clf()
 
 
-def generate_preference_map(sourceRoot,sessID,avgFolder,nCond,positiveThresh=True,tWindow1_startT=-2, tWindow1_endT=0,\
-                            tWindow2_startT=0, tWindow2_endT=5, motionCorrection=False, dsFactor=1, fwhm=0,\
+def generate_preference_map(sourceRoot,sessID,analysisDir,avgFolder,nCond,positiveThresh=True,\
                             thresh=0,useThresh2=True,thresh2=0):
     #Cesar Echavarria - 10/2016
     #VERIFY WE GOT NECESSARY VALUES
     if sourceRoot is None:
         raise TypeError("sourceRoot (directory) not specified!")
+    if analysisDir is None:
+        raise TypeError("analysisDir (directory) not specified!")
     if sessID is None:
         raise TypeError("sessID not specified!")
     if avgFolder is None:
         raise TypeError("avgFolder not specified!")
     if nCond is None:
         raise TypeError("nCond (number of conditions) not specified!")
-    # DEFINE DIRECTORIES
-    analysisRoot=sourceRoot+'/Sessions/'+sessID+'/Analyses/';
-    analysisDir=analysisRoot+'/Analysis_interpolate_minusRollingMean_dsFactor'+str(dsFactor)+'_fwhm'+str(fwhm)+\
-    '_MC'+str(int(motionCorrection))+'/''tWindow1_'+str(tWindow1_startT)+'_'+str(tWindow1_endT)+'_tWindow2_'\
-    +str(tWindow2_startT)+'_'+str(tWindow2_endT)+'/'
 
+    # DEFINE DIRECTORIES
     anatSource=sourceRoot+'Sessions/'+sessID+'/Surface/'
     inDir=analysisDir+'/AnalysisOutput/'+avgFolder+'/';
     outDir=analysisDir+'/Figures/'+avgFolder+'/preferenceMap/'
@@ -1153,9 +1631,9 @@ def generate_preference_map(sourceRoot,sessID,avgFolder,nCond,positiveThresh=Tru
                 funcOverlay[:,:,channel]=imTemp[:,:]
         #SAVE MAPS
         if useThresh2:
-            outFile=outDir+'colorCodedPositionMap_thresh_'+str(thresh)+'_thresh2_'+str(thresh2)+'.png'
+            outFile=outDir+sessID+'_colorCodedPositionMap_thresh_'+str(thresh)+'_thresh2_'+str(thresh2)+'.png'
         else:
-            outFile=outDir+'colorCodedPositionMap_thresh_'+str(thresh)+'.png'
+            outFile=outDir+sessID+'_colorCodedPositionMap_thresh_'+str(thresh)+'.png'
         misc.imsave(outFile,np.uint8(funcOverlay))
 
         #MAKE LEGEND
@@ -1202,9 +1680,9 @@ def generate_preference_map(sourceRoot,sessID,avgFolder,nCond,positiveThresh=Tru
                     funcOverlay[:,:,channel]=imTemp[:,:]
             #SAVE MAPS
             if useThresh2:
-                outFile=outDir+'colorCodedPositionMap'+colorDic[cMap]['name']+'_thresh_'+str(thresh)+'_thresh2_'+str(thresh2)+'.png'
+                outFile=outDir+sessID+'_colorCodedPositionMap'+colorDic[cMap]['name']+'_thresh_'+str(thresh)+'_thresh2_'+str(thresh2)+'.png'
             else:
-                outFile=outDir+'colorCodedPositionMap'+colorDic[cMap]['name']+'_thresh_'+str(thresh)+'.png'
+                outFile=outDir+sessID+'_colorCodedPositionMap'+colorDic[cMap]['name']+'_thresh_'+str(thresh)+'.png'
             misc.imsave(outFile,np.uint8(funcOverlay))
 
             #MAKE LEGEND
@@ -1223,5 +1701,5 @@ def generate_preference_map(sourceRoot,sessID,avgFolder,nCond,positiveThresh=Tru
                         legend[Y1:Y2,X1:X2,dim]=colorCode[count,dim];
                     count=count+1;
 
-            outFile=outDir+'colorCodedPositionLegend_.'+colorDic[cMap]['name']+'.png'   
+            outFile=outDir+'colorCodedPositionLegend.png'   
             misc.imsave(outFile,np.uint8(legend))
