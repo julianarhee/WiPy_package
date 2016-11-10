@@ -255,7 +255,7 @@ def motion_registration(imRef,frameStack):
     motionMag=np.zeros((frameCount))
     
     for f in range (0,frameCount):
-        if f%100==0:
+        if f%1000==0:
             print('Motion Registration at frame ' +str(f)+' of '+str(frameCount))
         im0=np.copy(frameStack[:,:,f])
         im0_forReg=np.uint8(np.true_divide(im0,np.max(im0))*255)
@@ -287,7 +287,7 @@ def apply_motion_correction(frameStack=None,warpMatrices=None):
     newFrameStack=np.zeros((szY,szX,frameCount))
     
     for f in range (0,frameCount):
-        if f%100==0:
+        if f%1000==0:
             print('Motion Correction at frame ' +str(f)+' of '+str(frameCount))
         im0=np.copy(frameStack[:,:,f])
         warpMatrix=warpMatrices[:,:,f]
@@ -393,7 +393,7 @@ def apply_motion_correction_boundaries(frameStack=None,boundaries=None):
     
     newFrameStack=np.zeros((newSzY,newSzX,frameCount))
     for f in range (0,frameCount):
-        if f%100==0:
+        if f%1000==0:
             print('frame ' +str(f)+' of '+str(frameCount))
         im0=np.copy(frameStack[:,:,f])
         newFrameStack[:,:,f]=im0[edgeUp:edgeDown,edgeLeft:edgeRight]
@@ -832,17 +832,23 @@ def average_trials_timecourse(sourceRoot, targetRoot, analysisDir, sessID, nCond
 
 
     for cond in range(nCond):
-        print("cond="+str(cond))
+        print("condition = "+str(cond+1))
         # RETRIEVE DATA
         for (runCount,run) in enumerate(runList):
-            print("run="+str(run))
+            print("run = "+str(run))
 
             inFile=inDir+sessID+'_run'+str(run)+'.npz'
             f=np.load(inFile)
             stimBlockCond=f['stimBlockCond']
             baseResp=f['baseline']
             stimResp=f['response']
-            frameRate=f['frameRate']
+            
+            if runCount == 0:
+                frameRate=f['frameRate']
+                timecourse_startT=f['timecourse_startT']
+                timecourse_endT=f['timecourse_endT']
+
+
 
             nPix,nTrials,basePts=np.shape(baseResp)
             nPix,nTrials,respPts=np.shape(stimResp)
@@ -867,7 +873,7 @@ def average_trials_timecourse(sourceRoot, targetRoot, analysisDir, sessID, nCond
             trialTextFile.write('NUMBER OF TRIALS\n')
             trialTextFile.write('\n')
         
-        trialTextFile.write('condition '+str(cond+1)+' '+str(np.shape(stimRespAll)[1])+'\n')
+        trialTextFile.write('condition '+str(cond+1)+' '+str(np.shape(stimRespAll)[1])+' trials\n')
         
 
 
@@ -1003,7 +1009,7 @@ def average_trials_tWindow(sourceRoot, targetRoot, sessID, nCond, runList, analy
             trialTextFile.write('NUMBER OF TRIALS\n')
             trialTextFile.write('\n')
         
-        trialTextFile.write('condition '+str(cond+1)+' '+str(np.shape(stimRespAll)[1])+'\n')
+        trialTextFile.write('condition '+str(cond+1)+' '+str(np.shape(stimRespAll)[1])+' trials\n')
 
         # AVERAGE OVER TIME
         if cond==0:
@@ -1229,7 +1235,7 @@ def make_movie_from_stack_mark_stim(frameStack,frameRate=24,onFrame=0,offFrame=N
     #GET RID OF TEMP FOLDER
     shutil.rmtree(tmpDir)  
     
-def make_movie_from_timecourse_average(sourceRoot, targetRoot, sessID, frameRate, analysisDir, avgFolder):
+def make_movie_from_timecourse_average(sourceRoot, targetRoot, sessID, frameRate, analysisDir, avgFolder, stimDur=5):
     #Cesar Echavarria 10/2016
     
     #MAKE SURE YOU GET SOME ARGUMENTS
