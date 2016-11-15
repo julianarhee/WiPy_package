@@ -12,7 +12,7 @@ from matplotlib import colors
 import time
 import shutil
 
-__version__ = '0.1.0'
+__version__ = '0.2.1'
 
 # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 
@@ -117,6 +117,22 @@ def get_block_paradigm(planFolder):
     nBlocks=len(blockCond)
     return blockCond,blockStartT,nBlocks
 
+def contrast_dictionary_to_labels(targetRoot,nCond):
+    #Cesar Echavarria 11/2016
+    
+    #LOAD IN DICTIONARY WITH CONTRAST DEFINITIONS
+    inFile=targetRoot+'contrastDic.npz'
+    f=np.load(inFile)
+    contrastDic=f['contrastDic']
+    
+    labelList=[]
+    for c in range(nCond):
+        #MAKE LABEL
+        endInd=contrastDic[c]['name'].index('_')
+        labelList.append(contrastDic[c]['name'][0:endInd])
+        
+    return labelList
+
 # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 
 # STRUCTURAL INFO FUNCTIONS
@@ -169,7 +185,7 @@ def get_surface(sourceRoot,targetRoot,sessID):
 
 
 
-def get_reference_frame(sourceRoot,sessID,runList):
+def get_reference_frame(sourceRoot,sessID,runList=np.arange(1,2)):
     #Cesar Echavarria 11/2016
     
     #MAKE SURE YOU GET SOME ARGUMENTS
@@ -177,8 +193,6 @@ def get_reference_frame(sourceRoot,sessID,runList):
         raise TypeError("sourceRoot is not defined!")
     if sessID is None:
         raise TypeError("sessID is not defined!")
-    if runList is None:
-        raise TypeError("runList is not defined!")
     
     runFolder=glob.glob(sourceRoot+sessID+'_run'+str(runList[0])+'_*')
     frameFolder=runFolder[0]+"/frames/"
@@ -528,22 +542,19 @@ def perform_motion_registration(sourceRoot,targetRoot,sessID,runList,makeMovies=
 # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 
 def get_analysis_path(analysisRoot,interp=False, removeRollingMean=False, \
-    motionCorrection=False, smoothing=False, fwhm=0, \
+    motionCorrection=False, smoothing_fwhm=False, \
     timecourseAnalysis=False, baseline_startT=-2, baseline_endT=0, timecourse_startT=0, timecourse_endT=8,\
      timeWindowAnalysis=False,tWindow1_startT=-2, tWindow1_endT=0, tWindow2_startT=0, tWindow2_endT=5):
 	#Cesar Echavarria 11/2016
     
-    #MAKE SURE YOU GET SOME ARGUMENTS
-    if analysisRoot is None:
-        raise TypeError("analysisRoot (directory) not specified!")
 
     imgOperationDir=''
     #DEFINE DIRECTORIES
     if motionCorrection:
     	imgOperationDir=imgOperationDir+'motionCorrection_'
 
-    if smoothing:
-    	imgOperationDir=imgOperationDir+'smoothing_fwhm'+str(fwhm)
+    if smoothing_fwhm is not False:
+    	imgOperationDir=imgOperationDir+'smoothing_fwhm'+str(smoothing_fwhm)
     else:
     	imgOperationDir=imgOperationDir+'noSmoothing'
 
@@ -568,10 +579,27 @@ def get_analysis_path(analysisRoot,interp=False, removeRollingMean=False, \
 
     return(tWindowDir,tCourseDir)
 
+def get_quality_control_figure_path(qualityControlRoot,\
+    motionCorrection=False, smoothing_fwhm=False):
+    #Cesar Echavarria 11/2016
+
+    imgOperationDir=''
+    #DEFINE DIRECTORIES
+    if motionCorrection:
+        imgOperationDir=imgOperationDir+'motionCorrection_'
+
+    if smoothing_fwhm is not False:
+        imgOperationDir=imgOperationDir+'smoothing_fwhm'+str(smoothing_fwhm)
+    else:
+        imgOperationDir=imgOperationDir+'noSmoothing'
+
+    QCtargetFolder=qualityControlRoot+'/'+imgOperationDir+'/Figures/'
+
+    return QCtargetFolder
 
 def analyze_blocked_data(sourceRoot, targetRoot, sessID, runList, frameRate, \
     interp=False, removeRollingMean=False, \
-    motionCorrection=False, smoothing=False, fwhm=0, \
+    motionCorrection=False, smoothing_fwhm=False, \
     timecourseAnalysis=False, baseline_startT=-2, baseline_endT=0, timecourse_startT=0, timecourse_endT=8,\
      timeWindowAnalysis=False,tWindow1_startT=-2, tWindow1_endT=0, tWindow2_startT=0, tWindow2_endT=5,\
      qualityControl=True):
@@ -593,11 +621,13 @@ def analyze_blocked_data(sourceRoot, targetRoot, sessID, runList, frameRate, \
     analysisRoot=targetRoot+'/Sessions/'+sessID+'/Analyses/';
 
     tWindowOutDir,tCourseOutDir=get_analysis_path(analysisRoot,interp, removeRollingMean, \
-    	motionCorrection, smoothing, fwhm, \
+    	motionCorrection, smoothing_fwhm, \
     	timecourseAnalysis, baseline_startT, baseline_endT, timecourse_startT, timecourse_endT,\
     	timeWindowAnalysis,tWindow1_startT, tWindow1_endT, tWindow2_startT, tWindow2_endT)
 
-    QCtargetFolder=targetRoot+'Sessions/'+sessID+'/QualControl/Figures/'
+    qualityControlRoot=targetRoot+'Sessions/'+sessID+'/QualControl'
+    QCtargetFolder=get_quality_control_figure_path(qualityControlRoot, motionCorrection, smoothing_fwhm)
+
 
     motionDir=targetRoot+'/Sessions/'+sessID+'/Motion/';
     motionFileDir=motionDir+'Registration/'
@@ -642,12 +672,8 @@ def analyze_blocked_data(sourceRoot, targetRoot, sessID, runList, frameRate, \
         # READ IN BLOCK PARADIGM
         blockCond,blockStartT,nBlocks=get_block_paradigm(planFolder)
 
-        # READ IN FIRST FRAME FOR SIZE
-        imFile=frameFolder+'frame0.tiff'
-        im0=misc.imread(imFile)
-        sz=im0.shape
 
-        # ***TO DO - APPLY SMOOTHING***
+        
         print('Loading frames...')
         if motionCorrection:
 
@@ -666,18 +692,37 @@ def analyze_blocked_data(sourceRoot, targetRoot, sessID, runList, frameRate, \
 
             szY,szX = np.shape(frameArray[:,:,0])
 
+
         else:
             #GET REFFERNCE FRAME
             imRef=get_reference_frame(sourceRoot,sessID,runList)
             szY,szX=imRef.shape
 
             # READ IN FRAMES
-            frameArray=np.zeros(sz+(frameCount,))
+            frameArray=np.zeros((szY,szX,frameCount))
             frameArray[:,:,0]=im0
             for f in range (1,frameCount):
                 imFile=frameFolder+'frame'+str(f)+'.tiff'
                 im0=misc.imread(imFile)
-                frameArray[:,:,f]=im0[:,:]
+                frameArray[:,:,f]=np.copy(im0)
+
+        #APPLY SMOOTHING
+        for f in range(0,frameCount):
+            im0=np.copy(frameArray[:,:,f])
+            if smoothing_fwhm is not False:
+                if smoothing_fwhm == 3:
+                    frameArray[:,:,f]=cv2.GaussianBlur(im0, (11,11), .9, .9)
+                elif smoothing_fwhm == 5:
+                    frameArray[:,:,f]=cv2.GaussianBlur(im0, (21,21), 1.7, 1.7)
+                elif smoothing_fwhm == 7:
+                    frameArray[:,:,f]=cv2.GaussianBlur(im0, (27,27), 2.6, 2.6)
+                elif smoothing_fwhm == 9:
+                    frameArray[:,:,f]=cv2.GaussianBlur(im0, (31,31), 3.4, 3.4)
+                elif smoothing_fwhm == 11:
+                    frameArray[:,:,f]=cv2.GaussianBlur(im0, (37,37), 4.3, 4.3)
+                else:
+                    raise TypeError("KERNEL NOT IMPLEMENTED")
+            
 
         frameArray=np.reshape(frameArray,(szY*szX,frameCount))
 
@@ -704,7 +749,7 @@ def analyze_blocked_data(sourceRoot, targetRoot, sessID, runList, frameRate, \
             fig.suptitle('Pixel '+str(randPix)+' Value Over Time', fontsize=20)
             plt.xlabel('Time (secs)',fontsize=16)
             plt.ylabel('Mean Pixel Value',fontsize=16)
-            plt.savefig(QCtargetFolder+sessID+'+run'+str(run)+'randomPixelValue.png')
+            plt.savefig(QCtargetFolder+sessID+'_run'+str(run)+'_randomPixelValue.png')
             plt.close()
 
         # INTERPOLATE FOR CONSTANT FRAME RATE
@@ -788,7 +833,7 @@ def analyze_blocked_data(sourceRoot, targetRoot, sessID, runList, frameRate, \
 
         
 def average_trials_timecourse(sourceRoot, targetRoot, analysisDir, sessID, nCond, runList, avgFolder,\
-    percentSignalChange=True, SDmaps=False):
+    motionCorrection=False, percentSignalChange=True, SDmaps=False):
     
     #MAKE SURE YOU GET SOME ARGUMENTS
     if sourceRoot is None:
@@ -824,10 +869,33 @@ def average_trials_timecourse(sourceRoot, targetRoot, analysisDir, sessID, nCond
     versionTextFile.write('WiPy version '+__version__+'\n')
     versionTextFile.close()
 
+    #OUTPUT TEXT FILE WITH RUN LIST
+    outFile=outDir+'list_of_runs_used.txt'
+    runTextFile = open(outFile, 'w+')
+    runTextFile.write('LIST OF RUNS\n')
+    runTextFile.write('\n')
+    for run in runList:
+        runTextFile.write(str(run)+' ')
+    runTextFile.close()
 
-    #GET REFFERNCE FRAME
-    imRef=get_reference_frame(sourceRoot,sessID,runList)
-    szY,szX=imRef.shape
+    if motionCorrection:
+        #GET MOTION CORRECTED BOUNDARIES
+        motionDir=targetRoot+'/Sessions/'+sessID+'/Motion/';
+        motionFileDir=motionDir+'Registration/'
+        inFile=motionFileDir+sessID+'_motionCorrectedBoundaries.npz'
+        f=np.load(inFile)
+        boundaries=f['boundaries']
+        edgeUp=boundaries[0]
+        edgeDown=boundaries[1]
+        edgeLeft=boundaries[2]
+        edgeRight=boundaries[3]
+        #GET MOTION CORRECTED FRAME SIZE
+        szY=edgeDown-edgeUp
+        szX=edgeRight-edgeLeft
+    else:
+        #GET REFFERNCE FRAME
+        imRef=get_reference_frame(sourceRoot,sessID,runList)
+        szY,szX=imRef.shape
 
 
 
@@ -847,6 +915,8 @@ def average_trials_timecourse(sourceRoot, targetRoot, analysisDir, sessID, nCond
                 frameRate=f['frameRate']
                 timecourse_startT=f['timecourse_startT']
                 timecourse_endT=f['timecourse_endT']
+                baseline_startT=f['baseline_startT']
+                baseline_endT=f['baseline_endT']
 
 
 
@@ -872,6 +942,7 @@ def average_trials_timecourse(sourceRoot, targetRoot, analysisDir, sessID, nCond
             trialTextFile = open(outFile, 'w+')
             trialTextFile.write('NUMBER OF TRIALS\n')
             trialTextFile.write('\n')
+
         
         trialTextFile.write('condition '+str(cond+1)+' '+str(np.shape(stimRespAll)[1])+' trials\n')
         
@@ -879,22 +950,37 @@ def average_trials_timecourse(sourceRoot, targetRoot, analysisDir, sessID, nCond
 
         if percentSignalChange:#output percent signal change avged over trials
             if cond==0:
-                stimRespMean=np.zeros((nPix,nCond,respPts))
+                responseAll=np.zeros((nPix,nCond,np.shape(stimRespAll)[1],respPts))
             baseRespTimeMean=np.mean(baseRespAll,2)#avg over time
 
-            allPSC=np.zeros(np.shape(stimRespAll))
             for pt in range(0,respPts):
-                allPSC[:,:,pt]=np.true_divide(stimRespAll[:,:,pt]-baseRespTimeMean,baseRespTimeMean)*100
+                responseAll[:,cond,:,pt]=np.true_divide(stimRespAll[:,:,pt]-baseRespTimeMean,baseRespTimeMean)*100
 
-            stimRespMean[:,cond,:]=np.mean(allPSC,1)#avg over trials
         else: #output pixel values avged over trials
             if cond==0:
-                stimRespMean=np.zeros((nPix,nCond,respPts))
-            stimRespMean[:,cond,:]=np.mean(stimRespAll,1)#avg over trials
+                responseAll=np.zeros((nPix,nCond,np.shape(stimRespAll)[1],respPts))
+            responseAll[:,cond,:,:]=stimRespAll
+
+        outFile=outDir+sessID+'_'+str(cond)+'_timecourse_allTrials'
+        np.savez(outFile,responseAll=responseAll[:,cond,:,:],nCond=nCond)
+
+    print(np.shape(responseAll))
+    stimRespMean=np.mean(responseAll,2)#avg over trials
+    print(np.shape(stimRespMean))
+
 
     trialTextFile.close()
+    
+
     outFile=outDir+sessID+'_timecourse_trialAvg'
-    np.savez(outFile,frameRate=frameRate,stimRespMean=stimRespMean,timecourse_startT=timecourse_startT,timecourse_endT=timecourse_endT)
+    np.savez(outFile,stimRespMean=stimRespMean)
+
+    outFile=outDir+sessID+'_timecourse_miscelleanous'
+    np.savez(outFile,frameRate=frameRate,percentSignalChange=percentSignalChange,\
+        timecourse_startT=timecourse_startT,timecourse_endT=timecourse_endT,\
+        baseline_startT=baseline_startT,baseline_endT=baseline_endT,\
+        nPix=nPix,nCond=nCond,nTrials=np.shape(stimRespAll)[1],respPts=respPts)
+    
 
     #OUTPUT AND SAVE STANDARD DEV
     if SDmaps:
@@ -949,6 +1035,15 @@ def average_trials_tWindow(sourceRoot, targetRoot, sessID, nCond, runList, analy
     versionTextFile = open(outFile, 'w+')
     versionTextFile.write('WiPy version '+__version__+'\n')
     versionTextFile.close()
+
+    #OUTPUT TEXT FILE WITH RUN LIST
+    outFile=outDir+'list_of_runs_used.txt'
+    runTextFile = open(outFile, 'w+')
+    runTextFile.write('LIST OF RUNS\n')
+    runTextFile.write('\n')
+    for run in runList:
+        runTextFile.write(str(run)+' ')
+    runTextFile.close()
 
 
     if motionCorrection:
@@ -1077,35 +1172,18 @@ def average_trials_tWindow(sourceRoot, targetRoot, sessID, nCond, runList, analy
 
 # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 
-# VISUALIZATION FUNCTIONS
+# ROI DEFINITION FUNCTIONS
 
 # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 
-def make_pixel_plots(targetRoot, sessID, frameRate, analysisDir, avgFolder, nPix=100):
 
-    #Cesar Echavarria 10/2016
+def make_ROI_single_pixel(ROIdir, dataDir, sessID, nPix=100):
+
+    #Cesar Echavarria 11/2016
     
-    #MAKE SURE YOU GET SOME ARGUMENTS
-    if targetRoot is None:
-        raise TypeError("targetRoot (directory) not specified!")
-    if sessID is None:
-        raise TypeError("sessID not specified!")
-    if frameRate is None:
-        raise TypeError("frameRate not specified!")
-    if analysisDir is None:
-        raise TypeError("analysisDir (directory) not specified!")
-    if avgFolder is None:
-        raise TypeError("avgFolder not specified!")
-        
-    # DEFINE DIRECTORIES
-    inDir=analysisDir+'/AnalysisOutput/'+avgFolder+'/';
-
-    figOutDir=analysisDir+'/Figures/'+avgFolder+'/timecourse_singlePixel/'
-    if not os.path.exists(figOutDir):
-        os.makedirs(figOutDir) 
 
     #LOAD IN STANDARD DEV MAP
-    inFile=inDir+sessID+'_mapSD.npz'
+    inFile=dataDir+sessID+'_mapSD.npz'
     f=np.load(inFile)
     mapSD=f['mapSD']
 
@@ -1114,47 +1192,213 @@ def make_pixel_plots(targetRoot, sessID, frameRate, analysisDir, avgFolder, nPix
     pixSD=np.reshape(mapSD,(szY*szX*nCond))
 
     pixList=np.unique(np.argsort(pixSD).argsort()[::-1][:nPix]%(szY*szX))
+    
+    locY,locX=np.unravel_index(pixList, (szY,szX))
+    
+    #SAVE ROI INDICES
+    for (pixCount,pix) in enumerate(pixList):
+        outFile=ROIdir+'/pixel'+str(pixCount)+'_ROI'
+        np.savez(outFile,ROIind=pix,locX=locX[pixCount],locY=locY[pixCount])
 
-    #LOAD IN TIME COURSE AND RELATED PARAMETERS
-    inFile=inDir+sessID+'_timecourse_trialAvg.npz'
+# # # # # # # # # # # # # # # # # # # # # # # # # # # #
+
+# VISUALIZATION FUNCTIONS
+
+# # # # # # # # # # # # # # # # # # # # # # # # # # # #
+
+
+        
+def plot_ROI_average_timecourse(figOutDir, sessID, ROIlabel, stimRespROI, frameTimes,\
+                                condLabels, stimStartT, stimEndT, percentSignalChange=True):
+    #Cesar Echavarria 11/2016
+    
+    #GET PARAMETERS FROM DATA STRUCTURE
+    nCond=np.shape(stimRespROI)[0]
+    
+    #MAKE PLOTS
+    colorList='bgrmkc'
+    legHand=[]
+    fig=plt.figure()
+    for c in range(nCond):
+        plt.plot(frameTimes,stimRespROI[c,:],colorList[c],linewidth=2)
+
+        
+        legHand.append(mlines.Line2D([], [], color=colorList[c], marker='_',
+                              markersize=15, label=condLabels[c]))
+    plt.legend(handles=legHand)
+
+    axes = plt.gca()
+    ymin, ymax = axes.get_ylim()
+    plt.axvline(x=stimStartT, ymin=ymin, ymax = ymax, linewidth=1, color='k')
+    plt.axvline(x=stimEndT, ymin=ymin, ymax = ymax, linewidth=1, color='r')
+
+    fig.suptitle(ROIlabel+' Response', fontsize=16)
+    plt.xlabel('Time (secs)',fontsize=16)
+    if percentSignalChange:
+        plt.ylabel('PSC',fontsize=16)
+    else:
+        plt.ylabel('Pixel Value',fontsize=16)
+    plt.savefig(figOutDir+sessID+'_'+ROIlabel+'_timecourse_trialAvg.png')
+    plt.close()
+    
+def plot_ROI_trial_timecourse(figFile, ROIlabel, stimRespROI, frameTimes,\
+                                condLabels, stimStartT, stimEndT, percentSignalChange=True):
+    #Cesar Echavarria 11/2016
+    
+    #GET PARAMETERS FROM DATA STRUCTURE
+    nCond,nTrials,respPts=np.shape(stimRespROI)
+    
+    permList=np.random.permutation(nCond*nTrials)
+    
+    #MAKE PLOTS
+    condInLegend=[]
+    colorList='bgrmkc'
+    legHand=[]
+    fig=plt.figure()
+    for permInd in permList:
+        cond=int(np.floor(np.true_divide(permInd,nTrials)))
+        trial=int(permInd%nTrials)
+        plt.plot(frameTimes,stimRespROI[cond,trial,:],colorList[cond],linewidth=1)
+        if cond not in condInLegend:
+            legHand.append(mlines.Line2D([], [], color=colorList[cond], marker='_',
+                                  markersize=15, label=condLabels[cond]))
+            condInLegend.append(cond)
+    plt.legend(handles=legHand)
+
+    axes = plt.gca()
+    ymin, ymax = axes.get_ylim()
+    plt.axvline(x=stimStartT, ymin=ymin, ymax = ymax, linewidth=1, color='k')
+    plt.axvline(x=stimEndT, ymin=ymin, ymax = ymax, linewidth=1, color='r')
+
+    fig.suptitle(ROIlabel+' Response', fontsize=16)
+    plt.xlabel('Time (secs)',fontsize=16)
+    if percentSignalChange:
+        plt.ylabel('PSC',fontsize=16)
+    else:
+        plt.ylabel('Pixel Value',fontsize=16)
+    plt.savefig(figFile)
+    plt.close()
+ 
+    
+def plot_single_pixel_timecourse(targetRoot, sessID, analysisDir, avgFolder,\
+                                         makeROIs=False, stimDur=5, nPix=100,plotMode='Average',subsetSize=10):
+    
+    #Cesar Echavarria 11/2016
+    
+    #DEFINE SOME DIRECTORIES
+    inDir=analysisDir+'/AnalysisOutput/'+avgFolder+'/';
+    
+    ROIdir=targetRoot+'/Sessions/'+sessID+'/ROIs/singlePixel'
+    if not os.path.exists(ROIdir):
+        os.makedirs(ROIdir) 
+    if plotMode=='Average':
+        figOutDir=analysisDir+'/Figures/'+avgFolder+'/timecourse_average_singlePixel/'
+    elif plotMode=='All':
+        figOutDir=analysisDir+'/Figures/'+avgFolder+'/timecourse_allTrials_singlePixel/'
+    elif plotMode=='Subset':
+        figOutDir=analysisDir+'/Figures/'+avgFolder+'/timecourse_trialSubset_singlePixel/'
+        
+    if not os.path.exists(figOutDir):
+        os.makedirs(figOutDir)
+    if makeROIs:
+        print('Making single pixel ROIs....')
+        #GENERATE SINGLE PIXEL ROIs
+        make_ROI_single_pixel(ROIdir, inDir, sessID, nPix)
+    
+    #LOAD MISCELlANEOUS
+    inFile=inDir+sessID+'_timecourse_miscelleanous.npz'
     f=np.load(inFile)
     startT=f['timecourse_startT']
     frameRate=f['frameRate']
-    stimRespMean=f['stimRespMean']
+    percentSignalChange=f['percentSignalChange']
+    nCond=f['nCond']
+    nPix=f['nPix']
+    nTrials=f['nTrials']
+    respPts=f['respPts']
+    
     sampRate=np.true_divide(1,frameRate)
+    
+    if plotMode=='Average':
+        #LOAD IN TIME COURSE DATA
+        inFile=inDir+sessID+'_timecourse_trialAvg.npz'
+        f=np.load(inFile)
+        stimRespMean=f['stimRespMean']
+        
 
-    #LOAD IN DICTIONARY WITH CONTRAST DEFINITIONS
-    inFile=targetRoot+'contrastDic.npz'
-    f=np.load(inFile)
-    contrastDic=f['contrastDic']
+        #GET SOME INFO ABOUT DATA
+        nPix,nCond,respPts=np.shape(stimRespMean)
+        frameTimes=np.linspace(startT,startT+(respPts)*sampRate,respPts)
+        condLabels=contrast_dictionary_to_labels(targetRoot,nCond)
+        
+    elif plotMode=='All' or plotMode=='Subset':
+        #LOAD IN TIME COURSE DATA
+        responseAll=np.zeros((nPix,nCond,nTrials,respPts))
+        for cond in range(nCond):
+            inFile=inDir+sessID+'_'+str(cond)+'_timecourse_allTrials.npz'
+            f=np.load(inFile)
+            responseAll[:,cond,:,:]=f['responseAll']
 
-    #GET SOME INFO ABOUT DATA
-    nPix,nCond,respPts=np.shape(stimRespMean)
-    frameTimes=np.linspace(startT,startT+(respPts)*sampRate,respPts)
+        #GET SOME INFO ABOUT DATA
+        frameTimes=np.linspace(startT,startT+(respPts)*sampRate,respPts)
+        condLabels=contrast_dictionary_to_labels(targetRoot,nCond)
 
-    #MAKE PLOTS
-    colorList='bgrmkc'
-    for pix in pixList:
-        legHand=[]
-        fig=plt.figure()
-        for c in range(0,nCond):
-            plt.plot(frameTimes,stimRespMean[pix,c,:],colorList[c],linewidth=2)
+    #GET ROI LIST
+    listROI=glob.glob(ROIdir+'/*.npz')
 
-            endInd=contrastDic[c]['name'].index('_')
-            legHand.append(mlines.Line2D([], [], color=colorList[c], marker='_',
-                                  markersize=15, label=contrastDic[c]['name'][0:endInd]))
-        plt.legend(handles=legHand)
+    #LOAD ROI INDICES AND DETAILS
+    if plotMode=='Average':
+            print('Plotting average timecourse within single pixel ROIs....')
+    elif plotMode=='All':
+         print('Plotting timecourse for all trials within single pixel ROIs....')
+    elif plotMode=='Subset':
+         print('Plotting timecourse for a subset of trials within single pixel ROIs....')
+    for roi in listROI:
+        # load file and variables
+        f=np.load(roi)
+        ROI_ind=f['ROIind']
+        locX=f['locX']
+        locY=f['locY']
 
-        axes = plt.gca()
-        ymin, ymax = axes.get_ylim()
-        plt.axvline(x=0, ymin=ymin, ymax = ymax, linewidth=1, color='k')
-        plt.axvline(x=5, ymin=ymin, ymax = ymax, linewidth=1, color='r')
+        ROI_label='Pixel_X_'+str(locX)+'_Y_'+str(locY)
+        if plotMode=='Average':
+            #AVERAGE ACROSS PIXELS IN ROI
+            if np.size(ROI_ind)>1:
+                stimRespROI=np.mean(stimRespMean[ROI_ind,:,:],0)
+            else:
+                stimRespROI=stimRespMean[ROI_ind,:,:]
 
-        fig.suptitle(sessID+' Pixel '+str(pix)+' Value Over Time', fontsize=16)
-        plt.xlabel('Time (secs)',fontsize=16)
-        plt.ylabel('PSC',fontsize=16)
-        plt.savefig(figOutDir+sessID+'+pixel_'+str(pix)+'_timecourse_trialAvg.png')
-        plt.close()
+            #PLOT ROI
+            plot_ROI_average_timecourse(figOutDir, sessID, ROI_label, stimRespROI, frameTimes,\
+                                    condLabels, startT, startT+stimDur, percentSignalChange)
+        elif plotMode=='All':
+            #AVERAGE ACROSS PIXELS IN ROI
+            if np.size(ROI_ind)>1:
+                stimRespROI=np.mean(responseAll[ROI_ind,:,:,:],0)
+            else:
+                stimRespROI=responseAll[ROI_ind,:,:,:]
+
+            #PLOT ROI
+            figFile=figOutDir+sessID+'_'+ROI_label+'_timecourse_allTrials.png'
+            plot_ROI_trial_timecourse(figFile, ROI_label, stimRespROI, frameTimes,\
+                                    condLabels, startT, startT+stimDur, percentSignalChange)
+        elif plotMode=='Subset':
+            #AVERAGE ACROSS PIXELS IN ROI
+            if np.size(ROI_ind)>1:
+                stimRespROI=np.mean(responseAll[ROI_ind,:,:,:],0)
+            else:
+                stimRespROI=responseAll[ROI_ind,:,:,:]
+            
+            #CHOOSE SUBSET OF TRIALS
+            stimRespROI_subset=np.zeros((nCond,subsetSize,respPts))
+            for cond in range(nCond):
+                permList=np.random.permutation(int(nTrials))
+                stimRespROI_subset[cond,:,:]=stimRespROI[cond,permList[0:subsetSize],:]
+            
+
+            #PLOT ROI
+            figFile=figOutDir+sessID+'_'+ROI_label+'_timecourse_'+str(subsetSize)+'Trials.png'
+            plot_ROI_trial_timecourse(figFile, ROI_label, stimRespROI_subset, frameTimes,\
+                                    condLabels, startT, startT+stimDur, percentSignalChange)
         
         
 def make_movie_from_stack(frameStack,frameRate=24,movFile='test.avi'):
@@ -1235,7 +1479,8 @@ def make_movie_from_stack_mark_stim(frameStack,frameRate=24,onFrame=0,offFrame=N
     #GET RID OF TEMP FOLDER
     shutil.rmtree(tmpDir)  
     
-def make_movie_from_timecourse_average(sourceRoot, targetRoot, sessID, frameRate, analysisDir, avgFolder, stimDur=5):
+def make_movie_from_timecourse_average(sourceRoot, targetRoot, sessID, frameRate, analysisDir, avgFolder,\
+    motionCorrection=False, stimDur=5):
     #Cesar Echavarria 10/2016
     
     #MAKE SURE YOU GET SOME ARGUMENTS
@@ -1259,15 +1504,31 @@ def make_movie_from_timecourse_average(sourceRoot, targetRoot, sessID, frameRate
     if not os.path.exists(movieOutDir):
         os.makedirs(movieOutDir) 
 
-    #GET REFFERNCE FRAME
-    imRef=get_reference_frame(sourceRoot,sessID,runList)
-    szY,szX=imRef.shape
+    if motionCorrection:#COULD BE MADE INTO A FXN (CALLED MULTIPLE TIMES)
+        #GET MOTION CORRECTED BOUNDARIES
+        motionDir=targetRoot+'/Sessions/'+sessID+'/Motion/';
+        motionFileDir=motionDir+'Registration/'
+        inFile=motionFileDir+sessID+'_motionCorrectedBoundaries.npz'
+        f=np.load(inFile)
+        boundaries=f['boundaries']
+        edgeUp=boundaries[0]
+        edgeDown=boundaries[1]
+        edgeLeft=boundaries[2]
+        edgeRight=boundaries[3]
+        #GET MOTION CORRECTED FRAME SIZE
+        szY=edgeDown-edgeUp
+        szX=edgeRight-edgeLeft
+    else:
+        #GET REFFERNCE FRAME
+        imRef=get_reference_frame(sourceRoot,sessID,runList)
+        szY,szX=imRef.shape
 
 
     #LOAD IN TIME COURSE AND RELATED PARAMETERS
     inFile=inDir+sessID+'_timecourse_trialAvg.npz'
     f=np.load(inFile)
     startT=f['timecourse_startT']
+    baseline_endT=f['baseline_endT']
     frameRate=f['frameRate']
     stimRespMean=f['stimRespMean']
     sampRate=np.true_divide(1,frameRate)
@@ -1281,10 +1542,11 @@ def make_movie_from_timecourse_average(sourceRoot, targetRoot, sessID, frameRate
 
     #GET SOME INFO ABOUT DATA
     nPix,nCond,respPts=np.shape(stimRespMean)
-    frameTimes=np.linspace(startT,startT+(respPts)*sampRate,respPts)
+    frameTimes=np.linspace(startT,startT+((respPts)*sampRate),respPts)
 
     onFrame=np.where(frameTimes>baseline_endT)[0][0]
     offFrame=np.where(frameTimes>stimDur)[0][0]
+
 
 
     for c in range(0,nCond):
@@ -1297,10 +1559,9 @@ def make_movie_from_timecourse_average(sourceRoot, targetRoot, sessID, frameRate
         #RESHAPE
         frameArray=np.reshape(frameArray,(szY,szX,respPts))
 
-
         #MAKE MOVIE
         endInd=contrastDic[c]['name'].index('_')
-        outFile=movieOutDir+movFile+'_'+contrastDic[c]['name'][0:endInd]+'_movie.avi'
+        outFile=movieOutDir+sessID+'_'+contrastDic[c]['name'][0:endInd]+'_movie.avi'
         #make_movie_from_stack(frameArray,frameRate=frameRate,movFile=outFile)
         make_movie_from_stack_mark_stim(frameArray,frameRate=frameRate,onFrame=onFrame,offFrame=offFrame,movFile=outFile)
 
@@ -1341,16 +1602,16 @@ def generate_PSC_map(sourceRoot,sessID,analysisDir,avgFolder, motionCorrection=F
     imSurf=cv2.imread(imFile,-1)
     imSurf=np.true_divide(imSurf,2**12)*2**8;
 
-    if motionCorrection:
-        #GET AND APPLY MOTION CORRECTED BOUNDARIES
-        inFile=motionFileDir+sessID+'_motionCorrectedBoundaries.npz'
-        f=np.load(inFile)
-        boundaries=f['boundaries']
-        edgeUp=boundaries[0]
-        edgeDown=boundaries[1]
-        edgeLeft=boundaries[2]
-        edgeRight=boundaries[3]
-        imSurf=imSurf[edgeUp:edgeDown,edgeLeft:edgeRight]
+    # if motionCorrection:
+    #     #LOAD MOTION CORRECTED BOUNDARIES
+    #     inFile=motionFileDir+sessID+'_motionCorrectedBoundaries.npz'
+    #     f=np.load(inFile)
+    #     boundaries=f['boundaries']
+    #     edgeUp=boundaries[0]
+    #     edgeDown=boundaries[1]
+    #     edgeLeft=boundaries[2]
+    #     edgeRight=boundaries[3]
+    #     imSurf=imSurf[edgeUp:edgeDown,edgeLeft:edgeRight]
 
     funcOverlayTmp=np.dstack((imSurf,imSurf,imSurf))
     szY,szX,nChannels=np.shape(funcOverlayTmp)
@@ -1365,6 +1626,13 @@ def generate_PSC_map(sourceRoot,sessID,analysisDir,avgFolder, motionCorrection=F
         mapFile=resultsDir+sessID+'_'+contrastDic[c]['name']+'_PSCmap.npz'
         f=np.load(mapFile)
         PSCmap=f['PSCmap']
+
+        if motionCorrection:
+            #LOAD MOTION CORRECTED BOUNDARIES
+            inFile=motionFileDir+sessID+'_motionCorrectedBoundaries.npz'
+            f=np.load(inFile)
+            boundaries=f['boundaries']
+            PSCmap=np.pad(PSCmap,boundaries,0)
 
         #RESIZE TO SIZE OF ANATOMICAL MAP
         PSCmap = cv2.resize(PSCmap,(szX,szY))
@@ -1651,29 +1919,32 @@ def generate_preference_map(sourceRoot,sessID,analysisDir,avgFolder,nCond,motion
     imSurf=cv2.imread(imFile,-1)
     imSurf=np.true_divide(imSurf,2**12)*2**8;
 
-    if motionCorrection:
-        #GET AND APPLY MOTION CORRECTED BOUNDARIES
-        inFile=motionFileDir+sessID+'_motionCorrectedBoundaries.npz'
-        f=np.load(inFile)
-        boundaries=f['boundaries']
-        edgeUp=boundaries[0]
-        edgeDown=boundaries[1]
-        edgeLeft=boundaries[2]
-        edgeRight=boundaries[3]
-        imSurf=imSurf[edgeUp:edgeDown,edgeLeft:edgeRight]
+    # if motionCorrection:
+    #     #GET AND APPLY MOTION CORRECTED BOUNDARIES
+    #     inFile=motionFileDir+sessID+'_motionCorrectedBoundaries.npz'
+    #     f=np.load(inFile)
+    #     boundaries=f['boundaries']
+    #     edgeUp=boundaries[0]
+    #     edgeDown=boundaries[1]
+    #     edgeLeft=boundaries[2]
+    #     edgeRight=boundaries[3]
+    #     imSurf=imSurf[edgeUp:edgeDown,edgeLeft:edgeRight]
 
     funcOverlay=np.dstack((imSurf,imSurf,imSurf))
     szY,szX,nChannels=np.shape(funcOverlay)
 
 
     #LOAD IN MAP: RESPONSES Z-SCORED RELATIVE TO BASELINE
-    allMaps=np.zeros((szY,szX,nCond))
+    
     for cond in range(0,nCond):
 
         mapFile=inDir+sessID+'_condition'+str(cond)+'_zScoreMap.npz'  
         f=np.load(mapFile)
         respMap=f['respMap']
+        
         szYmap,szXmap=np.shape(respMap)
+        if cond ==0:
+            allMaps=np.zeros((szYmap,szXmap,nCond))
 
         if not positiveThresh:#for negative thresholding
             respMap=-respMap
@@ -1690,13 +1961,26 @@ def generate_preference_map(sourceRoot,sessID,analysisDir,avgFolder,nCond,motion
             respMap2[respMap>thresh]=(respMapThresh[respMap>thresh]-np.mean(respMap))/np.std(respMap)
         #store into array for all conditions
         tmpMap=np.reshape(respMap2,(szYmap,szXmap))
-        tmpMap=cv2.resize(tmpMap,(szX,szY))
+   #     tmpMap=cv2.resize(tmpMap,(szX,szY))
         allMaps[:,:,cond]=tmpMap
 
     #SET 2ND THRESHOLD
     if useThresh2:
         allMaps[allMaps<thresh2]=0
 
+    if motionCorrection:
+        #LOAD MOTION CORRECTED BOUNDARIES
+        inFile=motionFileDir+sessID+'_motionCorrectedBoundaries.npz'
+        f=np.load(inFile)
+        boundaries=f['boundaries']
+        padDown=int(boundaries[0])
+        padUp=int(szY-boundaries[1])
+        padLeft=int(boundaries[2])
+        padRight=int(szX-boundaries[3])
+        allMaps=np.pad(allMaps,((padDown,padUp),(padLeft,padRight),(0,0)),'constant',constant_values=((0, 0),(0,0),(0,0)))
+
+    szYmap=szX
+    szXmap=szY
     #FIND CONDITION THAT EVOKE MAX RESPONSE FOR EACH PIXEL
     sumSigMap=np.sum(allMaps,2)
     maxPos=np.argmax(allMaps,2)+1
@@ -1711,6 +1995,7 @@ def generate_preference_map(sourceRoot,sessID,analysisDir,avgFolder,nCond,motion
             imTemp=funcOverlay[:,:,channel]
             for pos in range(1,nCond+1):
                 diffVal=(np.ones((szY,szX))*colorCode[pos-1,channel])-imTemp
+
                 imTemp[maxPos==pos]=imTemp[maxPos==pos]+np.multiply(diffVal[maxPos==pos],constantSat)
                 funcOverlay[:,:,channel]=imTemp[:,:]
         #SAVE MAPS
@@ -1753,8 +2038,9 @@ def generate_preference_map(sourceRoot,sessID,analysisDir,avgFolder,nCond,motion
                          'values':np.array([[255,0,0],[255,100,127],[127,0,127],[127,0,255],[0,0,255],\
                                             [255,0,0],[255,100,127],[127,0,127],[127,0,255],[0,0,255],\
                                             [255,0,0],[255,100,127],[127,0,127],[127,0,255],[0,0,255]])})
-        constantSat=.4
+        constantSat=.5
         for cMap in range(0,len(colorDic)):
+            funcOverlay=np.dstack((imSurf,imSurf,imSurf))
             colorCode=colorDic[cMap]['values']
             for channel in range(nChannels):
                 imTemp=funcOverlay[:,:,channel]
@@ -1785,5 +2071,5 @@ def generate_preference_map(sourceRoot,sessID,analysisDir,avgFolder,nCond,motion
                         legend[Y1:Y2,X1:X2,dim]=colorCode[count,dim];
                     count=count+1;
 
-            outFile=outDir+'colorCodedPositionLegend.png'   
+            outFile=outDir+colorDic[cMap]['name']+'_Legend.png'   
             misc.imsave(outFile,np.uint8(legend))
